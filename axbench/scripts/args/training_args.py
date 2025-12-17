@@ -18,6 +18,9 @@ class ModelContainer:
     def __getitem__(self, key):
         return self._models[key]
     
+    def __contains__(self, key):
+        return key in self._models
+    
     def __iter__(self):
         return iter(self._models.items())
     
@@ -80,6 +83,7 @@ class ModelParams:
     hypernet_name_or_path: Optional[str] = None
     hypernet_initialize_from_pretrained: Optional[bool] = True
     num_hidden_layers: Optional[int] = None
+    weight_target_modules: Optional[List[str]] = None
 
 class TrainingArgs:
     def __init__(
@@ -126,7 +130,8 @@ class TrainingArgs:
             'train_on_negative', 'use_synergy', 'bow_penalty', 'bow_C', 'loss_type', 'beta', 'gemma', 
             'reference_free', 'label_smoothing', 'steering_factors', 'negative_only', 'simpo_scaler', 
             'intervention_positions_dropout', 'dropout', 'preference_pairs', 'steering_prompt_type',
-            'hypernet_name_or_path', 'hypernet_initialize_from_pretrained', "num_hidden_layers"
+            'hypernet_name_or_path', 'hypernet_initialize_from_pretrained', "num_hidden_layers",
+            'weight_target_modules'
         ]
         all_params = global_params + hierarchical_params
 

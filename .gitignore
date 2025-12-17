@@ -20,6 +20,7 @@ axbench/demo/inference
 axbench/demo/generate
 axbench/demo/evaluate
 axbench/demo/lm_cache
+axbench/demo_weight
 axbench/scripts/train_fsdp.py
 axbench/sweep/wuzhengx/9b/l20/sft.yaml
 *.out

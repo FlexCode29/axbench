@@ -34,6 +34,7 @@ from .models.concept_reft import *
 from .models.preference_vector import *
 from .models.concept_vector import *
 from .models.hypersteer import *
+from .models.hypersteer_weight import *
 
 from .models.hypernet.configuration_hypernet import *
 from .models.hypernet.layers import *
