@@ -1,0 +1,62 @@
+generate:
+  lm_model: "gpt-4o-mini"
+  input_length: 32
+  output_length: 32
+  num_of_examples: 72
+  concept_path: "axbench/data/gemma-2-2b_20-gemmascope-res-16k.json"
+  max_concepts: 10
+  dataset_category: "instruction"
+  master_data_dir: "axbench/data"
+  seed: 42
+  keep_orig_axbench_format: true
+
+train:
+  model_name: "google/gemma-2-2b-it"
+  layer: 20
+  component: "res"
+  seed: 42
+  use_bf16: true
+  output_length: 128
+  models:
+    HyperSteerWeight:
+      batch_size: 8
+      gradient_accumulation_steps: 1
+      n_epochs: 5
+      lr: 0.00005
+      weight_decay: 0.0
+      low_rank_dimension: 4
+      intervention_positions: "all"
+      exclude_bos: true
+      hypernet_name_or_path: "google/gemma-2-2b-it"
+      num_hidden_layers: 4
+      hypernet_initialize_from_pretrained: false
+      weight_target_modules:
+        - "model.layers.*.mlp.down_proj.weight"
+
+inference:
+  use_bf16: true
+  models: ["HyperSteerWeight"]
+  model_name: "google/gemma-2-2b-it"
+  output_length: 128
+
+  steering_intervention_type: "weight"
+  steering_model_name: "google/gemma-2-2b-it"
+  steering_datasets: ["AlpacaEval"]
+  steering_batch_size: 8
+  steering_output_length: 128
+  steering_layers: [20]
+  steering_num_of_examples: 10
+  steering_factors: [1.0]
+
+  master_data_dir: "axbench/data"
+  seed: 42
+  lm_model: "gpt-4o-mini"
+  temperature: 1.0
+
+evaluate:
+  models: ["HyperSteerWeight"]
+  steering_evaluators:
+    - "LMJudgeEvaluator"
+  num_of_workers: 16
+  lm_model: "gpt-4o-mini"
+  master_data_dir: "axbench/data"

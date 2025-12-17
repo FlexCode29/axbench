@@ -244,10 +244,13 @@ def save_state(dump_dir, state, concept_metadata, rank):
         f.write(json.dumps(concept_metadata) + "\n")
         
         
-def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, metadata, dump_dir, rank, device, local_rank, world_size):
+def train_hypersteer(
+    model_name,
+    args, generate_args, model_instance, tokenizer,
+    all_df, metadata, dump_dir, rank, device, local_rank, world_size
+):
     # Get the rank and world_size from environment variables
     negative_df = all_df[(all_df["output_concept"] == EMPTY_CONCEPT) & (all_df["category"] == "negative")]
-    model_name = "HyperSteer"
     
     metadata_path = os.path.join(args.data_dir, 'metadata.jsonl')
     is_chat_model = True if args.model_name in CHAT_MODELS else False
@@ -433,7 +436,7 @@ def main():
         logger.warning(f"Training models for concept_id {concept_id} on rank {rank}")
         for model_name in sorted(args.models.keys()):
             
-            if model_name == "HyperSteer":
+            if model_name in {"HyperSteer", "HyperSteerWeight"}:
                 continue # training of HyperSteer is ran separately.
             
             concept = metadata[concept_id]["concept"]
@@ -522,9 +525,15 @@ def main():
     # Synchronize all processes
     dist.barrier()
     
-    if "HyperSteer" in args.models.keys():
-        train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, metadata, dump_dir, rank, device, local_rank, world_size)
-    
+    for m in ("HyperSteer", "HyperSteerWeight"):
+        if m in args.models:
+            train_hypersteer(
+                m,
+                args, generate_args, model_instance, tokenizer,
+                all_df, metadata, dump_dir,
+                rank, device, local_rank, world_size
+            )
+
     # Synchronize all processes 
     dist.barrier()
 

@@ -38,9 +38,9 @@ RETRY_DELAY = 1  # in seconds
 STATE_FILE = "inference_state.pkl"
 CONFIG_FILE = "config.json"
 METADATA_FILE = "metadata.jsonl"
-STEERING_WITH_SHARED_MODELS = {"HyperSteer"}
+STEERING_WITH_SHARED_MODELS = {"HyperSteer", "HyperSteerWeight"}
 STEERING_EXCLUDE_MODELS = {"IntegratedGradients", "InputXGradients", "PromptDetection", "BoW"}
-LATENT_EXCLUDE_MODELS = {"PromptSteering", "PromptBaseline", "DiReFT", "LoReFT", "LoRA", "SFT", "HyperSteer"}
+LATENT_EXCLUDE_MODELS = {"PromptSteering", "PromptBaseline", "DiReFT", "LoReFT", "LoRA", "SFT", "HyperSteer", "HyperSteerWeight"}
 LATENT_PROMPT_PREFIX = "Generate a random sentence."
 
 def load_config(config_path):
