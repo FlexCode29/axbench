@@ -46,7 +46,7 @@ inference:
   steering_output_length: 128
   steering_layers: [20]
   steering_num_of_examples: 10
-  steering_factors: [1.0]
+  steering_factors: [0.0, 1.0]
 
   master_data_dir: "axbench/data"
   seed: 42
