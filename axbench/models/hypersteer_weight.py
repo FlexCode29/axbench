@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import math
+from statistics import pstdev
 
 import torch
 import torch.distributed as dist
@@ -14,12 +16,13 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
-from transformers import AutoTokenizer, get_scheduler
+from transformers import AutoTokenizer
 
 from .hypernet.configuration_hypernet import HypernetConfig
 from .hypernet.modeling_hypernet import HypernetModel
 from .model import Model
 from ..utils.data_utils import make_data_module
+from torch.optim.lr_scheduler import LambdaLR
 
 
 METADATA_FILE = "metadata.jsonl"
@@ -374,6 +377,24 @@ class HyperSteerWeight(Model):
         world_size = kwargs.get("world_size", dist.get_world_size())
         kwargs = dict(kwargs)
         kwargs.pop("world_size", None)
+        log_to_wandb = self.use_wandb and rank == 0
+        wandb_run = None
+        if log_to_wandb:
+            import wandb
+
+            run_name = kwargs.get("run_name") or f"{self.__str__()}_{self.layer}"
+            wandb_project = kwargs.get("wandb_project")
+            wandb_name = kwargs.get("wandb_name")
+            wandb_init_kwargs = {
+                "dir": "wandb",
+                "name": run_name,
+            }
+            if wandb_project:
+                wandb_init_kwargs["project"] = wandb_project
+            if wandb_name:
+                wandb_init_kwargs["entity"] = wandb_name
+            wandb_run = wandb.init(**wandb_init_kwargs)
+
         train_dataloader, train_sampler = self.make_dataloader(
             examples,
             rank=rank,
@@ -399,45 +420,97 @@ class HyperSteerWeight(Model):
             lr=self.training_args.lr,
             weight_decay=self.training_args.weight_decay,
         )
-        steps_per_epoch = max(1, len(train_dataloader) // self.training_args.gradient_accumulation_steps)
-        num_training_steps = self.training_args.n_epochs * steps_per_epoch
-        lr_scheduler = get_scheduler(
-            "linear",
-            optimizer=optimizer,
-            num_warmup_steps=0,
-            num_training_steps=num_training_steps,
+        steps_per_epoch = max(
+            1,
+            math.ceil(len(train_dataloader) / self.training_args.gradient_accumulation_steps),
         )
+        num_training_steps = self.training_args.n_epochs * steps_per_epoch
+        lr_scheduler = self._build_lr_scheduler(optimizer, num_training_steps)
 
         progress_bar = tqdm(range(num_training_steps), position=rank, leave=True)
         embedding_model.train()
         self.hyper_projector.train()
 
         optimizer.zero_grad()
-        for epoch in range(self.training_args.n_epochs):
-            train_sampler.set_epoch(epoch)
-            for step, batch in enumerate(train_dataloader):
-                batch = {k: v.to(self.device) for k, v in batch.items()}
-                concept_id_list = batch["concept_ids"].detach().cpu().tolist()
-                coeff_tensor = self._build_batch_coeffs(concept_id_list, embedding_model=embedding_model)
-                with self._activate_coefficients(coeff_tensor):
-                    outputs = self.model(
-                        input_ids=batch["input_ids"],
-                        attention_mask=batch["attention_mask"],
-                        labels=batch["labels"],
+        global_step = 0
+        loss_history: List[float] = []
+        try:
+            for epoch in range(self.training_args.n_epochs):
+                if train_sampler is not None:
+                    train_sampler.set_epoch(epoch)
+                for step, batch in enumerate(train_dataloader):
+                    batch = {k: v.to(self.device) for k, v in batch.items()}
+                    concept_id_list = batch["concept_ids"].detach().cpu().tolist()
+                    coeff_tensor = self._build_batch_coeffs(concept_id_list, embedding_model=embedding_model)
+                    with self._activate_coefficients(coeff_tensor):
+                        outputs = self.model(
+                            input_ids=batch["input_ids"],
+                            attention_mask=batch["attention_mask"],
+                            labels=batch["labels"],
+                        )
+                    raw_loss = outputs.loss.mean()
+                    loss = raw_loss / self.training_args.gradient_accumulation_steps
+                    loss.backward()
+
+                    should_step = (
+                        (step + 1) % self.training_args.gradient_accumulation_steps == 0
+                        or (step + 1) == len(train_dataloader)
                     )
-                loss = outputs.loss.mean()
-                loss = loss / self.training_args.gradient_accumulation_steps
-                loss.backward()
+                    if should_step:
+                        torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
+                        optimizer.step()
+                        lr_scheduler.step()
+                        optimizer.zero_grad()
+                        progress_bar.update(1)
+                        global_step += 1
+                        current_lr = optimizer.param_groups[0]["lr"]
+                        raw_loss_val = raw_loss.item()
+                        loss_history.append(raw_loss_val)
+                        progress_bar.set_description(
+                            f"rank {rank} loss {raw_loss_val:.4f} lr {current_lr:.6f}"
+                        )
+                        if log_to_wandb and wandb_run is not None:
+                            epoch_progress = epoch + (step / max(1, len(train_dataloader)))
+                            loss_std = pstdev(loss_history) if len(loss_history) > 1 else 0.0
+                            wandb.log(
+                                {
+                                    "train/loss": raw_loss_val,
+                                    "train/loss_std": loss_std,
+                                    "train/learning_rate": current_lr,
+                                    "train/epoch": epoch_progress,
+                                },
+                                step=global_step,
+                            )
+        finally:
+            progress_bar.close()
+            if wandb_run is not None:
+                wandb_run.finish()
 
-                if (step + 1) % self.training_args.gradient_accumulation_steps == 0 or (step + 1) == len(train_dataloader):
-                    torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
-                    optimizer.step()
-                    lr_scheduler.step()
-                    optimizer.zero_grad()
-                    progress_bar.update(1)
-                    progress_bar.set_description(f"rank {rank} loss {loss.item():.4f}")
+    def _build_lr_scheduler(self, optimizer, num_training_steps: int) -> LambdaLR:
+        total_steps = max(1, num_training_steps)
+        decay_start = getattr(self.training_args, "lr_decay_start_step", 0) or 0
+        decay_start = max(0, min(decay_start, total_steps))
+        base_lr = self.training_args.lr or 0.0
+        min_lr = getattr(self.training_args, "lr_min", 0.0) or 0.0
+        if base_lr <= 0:
+            min_factor = 1.0
+        else:
+            min_lr = max(0.0, min(min_lr, base_lr))
+            min_factor = min_lr / base_lr if base_lr > 0 else 0.0
 
-        progress_bar.close()
+        if decay_start >= total_steps or min_factor == 1.0:
+            return LambdaLR(optimizer, lambda step: 1.0)
+
+        decay_range = max(1, total_steps - decay_start)
+
+        def lr_lambda(step: int) -> float:
+            if step <= decay_start:
+                return 1.0
+            decay_progress = min(step - decay_start, decay_range)
+            ratio = decay_progress / decay_range
+            return 1.0 - (1.0 - min_factor) * ratio
+
+        return LambdaLR(optimizer, lr_lambda)
 
     def _prepare_generation(self, texts: List[str]) -> Dict[str, torch.Tensor]:
         prev_padding = self.tokenizer.padding_side

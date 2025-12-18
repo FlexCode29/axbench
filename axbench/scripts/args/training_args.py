@@ -40,6 +40,8 @@ class ModelParams:
     n_epochs: Optional[int] = None
     topk: Optional[int] = None
     lr: Optional[float] = None
+    lr_decay_start_step: Optional[int] = 0
+    lr_min: Optional[float] = 0.0
     dropout: Optional[float] = 0.0
     coeff_l1_loss_null: Optional[float] = None
     coeff_latent_l1_loss: Optional[float] = None
@@ -122,7 +124,8 @@ class TrainingArgs:
         ]
         hierarchical_params = [
             'batch_size', 'n_epochs', 'topk',
-            'lr', 'coeff_l1_loss_null', 'coeff_l1_loss', 'coeff_l2_loss', 'coeff_norm_loss', 
+            'lr', 'lr_decay_start_step', 'lr_min',
+            'coeff_l1_loss_null', 'coeff_l1_loss', 'coeff_l2_loss', 'coeff_norm_loss', 
             'low_rank_dimension', 'dataset_category', 'intervention_positions', 'intervention_layers',
             'exclude_bos', 'binarize_dataset', 'intervention_type', 'gradient_accumulation_steps',
             'coeff_latent_l1_loss', 'reft_layers', 'reft_positions', 'reft_type', 'lora_layers',

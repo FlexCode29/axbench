@@ -259,7 +259,8 @@ def train_hypersteer(
         model_instance, tokenizer, layer=args.layer,
         training_args=args.models[model_name],
         lm_model_name=args.model_name,
-        device=device, seed=args.seed, 
+        device=device, seed=args.seed,
+        use_wandb=args.use_wandb,
     )
     
     low_rank_dimension = args.models[model_name].low_rank_dimension \
@@ -302,6 +303,9 @@ def train_hypersteer(
         "exclude_bos": args.models[model_name].exclude_bos,
         "metadata_path": metadata_path,
         "world_size": world_size,
+        "wandb_project": args.wandb_project,
+        "wandb_name": args.wandb_name,
+        "run_name": args.run_name,
     }
     
     benchmark_model.train(full_df, **kwargs)
@@ -671,4 +675,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
