@@ -57,7 +57,7 @@ def harmonic_mean(scores):
         return 0
     return len(scores) / sum(1/s for s in scores)
 
-def data_generator(data_dir, mode, winrate_split_ratio=None):
+def data_generator(data_dir, mode, winrate_split_ratio=None, sample_concepts=None, sample_examples=None, sample_seed=None):
     """
     Generator function to read data files and yield data subsets by group_id.
     Pre-loads data in chunks to reduce I/O bottlenecks.
@@ -77,6 +77,14 @@ def data_generator(data_dir, mode, winrate_split_ratio=None):
         df = pd.read_parquet(os.path.join(data_dir, f'steering_data.parquet'))
     elif mode == "train_data":
         df = pd.read_parquet(os.path.join(data_dir, f'dpo_train_data.parquet'))
+    # Optionally sample concept_ids for evaluation
+    if sample_concepts is not None and int(sample_concepts) > 0:
+        rng = np.random.RandomState(sample_seed if sample_seed is not None else 0)
+        concept_ids = sorted(df["concept_id"].unique())
+        if int(sample_concepts) < len(concept_ids):
+            selected = set(rng.choice(concept_ids, size=int(sample_concepts), replace=False))
+            df = df[df["concept_id"].isin(selected)]
+
     # Group by concept_id and store in dictionary
     for concept_id, group in df.groupby('concept_id'):
         if concept_id not in concept_data:
@@ -96,6 +104,12 @@ def data_generator(data_dir, mode, winrate_split_ratio=None):
                 df_subset = df_subset[df_subset["input_id"] < n_steering_ids]
             elif mode == "steering_test" or mode == "winrate":
                 df_subset = df_subset[df_subset["input_id"] >= n_steering_ids]
+        if sample_examples is not None and int(sample_examples) > 0:
+            rng = np.random.RandomState(sample_seed if sample_seed is not None else 0)
+            input_ids = sorted(df_subset["input_id"].unique())
+            if int(sample_examples) < len(input_ids):
+                selected_inputs = set(rng.choice(input_ids, size=int(sample_examples), replace=False))
+                df_subset = df_subset[df_subset["input_id"].isin(selected_inputs)]
         yield (concept_id, df_subset)
 
 
@@ -418,7 +432,10 @@ def eval_steering(args):
     # Initialize data generator
     df_generator = data_generator(
         args.data_dir, mode=args.mode, 
-        winrate_split_ratio=args.winrate_split_ratio)
+        winrate_split_ratio=args.winrate_split_ratio,
+        sample_concepts=args.sample_concepts,
+        sample_examples=args.sample_examples,
+        sample_seed=args.sample_seed)
 
     # Load previous state if exists
     state = load_state(args.dump_dir, mode=args.mode)
@@ -473,7 +490,10 @@ def eval_steering(args):
 
         df_generator = data_generator(
             args.data_dir, mode=args.mode, 
-            winrate_split_ratio=args.winrate_split_ratio)
+            winrate_split_ratio=args.winrate_split_ratio,
+            sample_concepts=args.sample_concepts,
+            sample_examples=args.sample_examples,
+            sample_seed=args.sample_seed)
 
         all_tasks_rule_special = [
             (concept_id, current_df, evaluator_name, model_name, args.dump_dir, \
@@ -658,7 +678,11 @@ def eval_latent(args):
     if not os.path.exists(latent_data_path):
         logger.warning(f"Latent data not found at {latent_data_path}")
         return
-    df_generator = data_generator(args.data_dir, mode="latent")
+    df_generator = data_generator(
+        args.data_dir, mode="latent",
+        sample_concepts=args.sample_concepts,
+        sample_examples=args.sample_examples,
+        sample_seed=args.sample_seed)
 
     state = load_state(args.dump_dir, mode="latent")
     start_concept_id = state.get("concept_id", 0) if state else 0

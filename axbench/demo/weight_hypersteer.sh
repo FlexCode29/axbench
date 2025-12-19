@@ -7,6 +7,7 @@ fi
 
 gpu_count=8
 export DEMO_DIR=axbench/demo_weight
+export OPENAI_API_KEY="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"
 
 python axbench/scripts/generate.py \
   --config axbench/demo/sweep/hypersteer_weight_simple.yaml \

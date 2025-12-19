@@ -21,9 +21,7 @@ axbench/demo/generate
 axbench/demo/evaluate
 axbench/demo/lm_cache
 axbench/demo_weight
-axbench/demo_weight_works
-axbench/demo_weight_works_well
-axbench/demo_weight_eval_500_narrow
+axbench/old_demoes
 
 
 

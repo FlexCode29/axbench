@@ -26,6 +26,9 @@ class EvalArgs:
     overwrite_evaluate_dump_dir: Optional[str] = None
     steer_data_type: Optional[str] = "concept"
     defense: Optional[List[str]] = field(default_factory=lambda: [])
+    sample_concepts: Optional[int] = None
+    sample_examples: Optional[int] = None
+    sample_seed: Optional[int] = None
 
     def __init__(
         self,
