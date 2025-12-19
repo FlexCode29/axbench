@@ -76,6 +76,6 @@ evaluate:
   run_winrate: false
   winrate_baseline: "PromptSteering"
   master_data_dir: "axbench/data"
-  sample_concepts: 50
+  sample_concepts: 500
   sample_examples: 10
   sample_seed: 42
