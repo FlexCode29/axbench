@@ -1,0 +1,8 @@
+baseline: factor 0.0 (same model)
+metric: LMJudgeEvaluator
+selection: factor 1.0 vs 0.0
+
+HyperSteerWeight:
+  pairs=2500 wins=109 losses=54 ties=2337
+  win_rate_non_tie=0.6687 p_value_one_sided=9.877e-06 confidence=1
+  jsonl_factor1_vs_0: concepts=500 wins=73 losses=40 ties=387 win_rate_non_tie=0.6460 p_value_one_sided=0.001228 confidence=0.9988

@@ -113,6 +113,12 @@ def parse_args():
         help="Use rows with this factor as the baseline within the same model (e.g. 0.0).",
     )
     parser.add_argument(
+        "--model-factor",
+        type=float,
+        default=1.0,
+        help="When using --baseline-factor, compare this factor against the baseline (default: 1.0).",
+    )
+    parser.add_argument(
         "--evaluator",
         type=str,
         default="LMJudgeEvaluator",
@@ -161,7 +167,10 @@ def main():
     else:
         lines.append(f"baseline: factor {args.baseline_factor} (same model)")
     lines.append(f"metric: {args.evaluator}")
-    lines.append("selection: best factor per concept")
+    if baseline_mode == "model":
+        lines.append("selection: best factor per concept")
+    else:
+        lines.append(f"selection: factor {args.model_factor} vs {args.baseline_factor}")
     lines.append("")
 
     for model_name in sorted(model_names):
@@ -170,18 +179,18 @@ def main():
         model_col = f"{model_name}{model_suffix}"
         baseline_col = f"{args.baseline}{model_suffix}"
 
-        model_best = {cid: factors.get(model_name) for cid, factors in best_factors.items()}
-        baseline_best = {cid: factors.get(args.baseline) for cid, factors in best_factors.items()}
-
-        if not any(v is not None for v in model_best.values()):
-            model_best = best_factors_from_df(df, model_col)
-        else:
-            fallback = best_factors_from_df(df, model_col)
-            for cid, factor in fallback.items():
-                if model_best.get(cid) is None:
-                    model_best[cid] = factor
-
         if baseline_mode == "model":
+            model_best = {cid: factors.get(model_name) for cid, factors in best_factors.items()}
+            baseline_best = {cid: factors.get(args.baseline) for cid, factors in best_factors.items()}
+
+            if not any(v is not None for v in model_best.values()):
+                model_best = best_factors_from_df(df, model_col)
+            else:
+                fallback = best_factors_from_df(df, model_col)
+                for cid, factor in fallback.items():
+                    if model_best.get(cid) is None:
+                        model_best[cid] = factor
+
             if not any(v is not None for v in baseline_best.values()):
                 baseline_best = best_factors_from_df(df, baseline_col)
             else:
@@ -190,12 +199,12 @@ def main():
                     if baseline_best.get(cid) is None:
                         baseline_best[cid] = factor
 
-        model_df = filter_best_factor_rows(df, {k: v for k, v in model_best.items() if v is not None})
-        if baseline_mode == "model":
+            model_df = filter_best_factor_rows(df, {k: v for k, v in model_best.items() if v is not None})
             baseline_df = filter_best_factor_rows(
                 df, {k: v for k, v in baseline_best.items() if v is not None}
             )
         else:
+            model_df = df[df["factor"] == args.model_factor].copy()
             baseline_df = df[df["factor"] == args.baseline_factor].copy()
 
         baseline_metric_col = baseline_col if baseline_mode == "model" else model_col
@@ -213,12 +222,12 @@ def main():
 
         wins = losses = ties = 0
         for _, row in paired.iterrows():
-            model_score = row[f"{model_col}_best"] if baseline_mode == "factor" else row[model_col]
-            baseline_score = (
-                row[f"{baseline_metric_col}_baseline"]
-                if baseline_mode == "factor"
-                else row[baseline_metric_col]
-            )
+            if baseline_mode == "model":
+                model_score = row[model_col]
+                baseline_score = row[baseline_metric_col]
+            else:
+                model_score = row[f"{model_col}_best"]
+                baseline_score = row[f"{baseline_metric_col}_baseline"]
             if model_score > baseline_score + 1e-9:
                 wins += 1
             elif baseline_score > model_score + 1e-9:
@@ -234,7 +243,7 @@ def main():
         lines.append(f"{model_name}:")
         lines.append(f"  pairs={len(paired)} wins={wins} losses={losses} ties={ties}")
         lines.append(f"  win_rate_non_tie={win_rate:.4f} p_value_one_sided={p_value:.4g} confidence={confidence:.4g}")
-        if baseline_mode == "factor" and float(args.baseline_factor) == 0.0:
+        if baseline_mode == "factor" and float(args.baseline_factor) == 0.0 and float(args.model_factor) == 1.0:
             model_factor_means = factor_means.get(model_name, {})
             factor1_means = model_factor_means.get(1.0, {})
             factor0_means = model_factor_means.get(0.0, {})
