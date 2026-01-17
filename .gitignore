@@ -23,7 +23,8 @@ axbench/demo/lm_cache
 axbench/demo_weight
 axbench/old_demoes
 
-
+axbench/archive_of_runs
+axbench/16k_full_pipeline_results
 
 axbench/scripts/train_fsdp.py
 axbench/sweep/wuzhengx/9b/l20/sft.yaml

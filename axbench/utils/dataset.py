@@ -639,12 +639,27 @@ class SteeringDatasetFactory(object):
         self, tokenizer, dump_dir, has_prompt_steering=False, **kwargs):
         self.tokenizer = tokenizer
         self.master_data_dir = kwargs.get("master_data_dir", None)
+        self.train_data_dir = kwargs.get("train_data_dir", None)
         if kwargs.get("lm_client", None):
             self.lm_model = LanguageModel(
                 kwargs.get("lm_model", "gpt-4o-mini"), kwargs["lm_client"], dump_dir, 
                 use_cache=True, master_data_dir=self.master_data_dir
             )
         self.has_prompt_steering = has_prompt_steering
+        self._train_data_path = None
+
+    def _load_train_df_for_concept(self, concept_id):
+        if self.train_data_dir is None:
+            raise ValueError("train_data_dir is required for TrainData steering dataset.")
+        if self._train_data_path is None:
+            self._train_data_path = os.path.join(self.train_data_dir, "train_data.parquet")
+        if not os.path.exists(self._train_data_path):
+            raise FileNotFoundError(f"train_data.parquet not found at {self._train_data_path}")
+        try:
+            return pd.read_parquet(self._train_data_path, filters=[("concept_id", "=", concept_id)])
+        except Exception:
+            df = pd.read_parquet(self._train_data_path)
+            return df[df["concept_id"] == concept_id]
 
 
     def create_eval_df(
@@ -723,6 +738,59 @@ class SteeringDatasetFactory(object):
                     columns = [
                         'dataset_name', 'concept_id', 'input_concept', 
                         'input_id', 'factor', 'original_prompt', 'steered_input', 'input', "suppress_original", "suppress_rewrite", "steered_prompt", "defense"])
+                all_dfs.append(df)
+
+            elif dataset_name == "TrainData":
+                train_df = self._load_train_df_for_concept(concept_id)
+                if train_df.empty:
+                    continue
+
+                if self.has_prompt_steering:
+                    steering_prompts = asyncio.run(get_steering_prompts(self.lm_model, concepts))
+                    steering_prompts = [prompt.strip() for prompt in steering_prompts]
+                else:
+                    steering_prompts = [T_PROMPT_STEERING % (concept) for concept in concepts]
+
+                all_examples = []
+                for idx, concept in enumerate(concepts):
+                    sampled_prompts = (
+                        train_df["input"]
+                        .sample(subset_n, replace=len(train_df) < subset_n, random_state=int(concept_id))
+                        .tolist()
+                    )
+                    for i in range(subset_n):
+                        sampled_prompt = sampled_prompts[i]
+                        steering_prompt = steering_prompts[idx] \
+                            if steering_prompts[idx] != "" else T_PROMPT_STEERING % (concept)
+                        if steer_data_type == "concept":
+                            steered_prompt = f"{steering_prompt}\n\nQuestion: {sampled_prompt}"
+                        else:
+                            steered_prompt = f"{sampled_prompt}\n{concept}"
+
+                        system_messages = []
+                        if steering_model_name in HAS_SYSTEM_PROMPT_MODELS:
+                            system_messages = [{"role": "system", "content": "You are a helpful assistant."}]
+                        formatted_steered_prompt = self.tokenizer.apply_chat_template(
+                            system_messages + [{"role": "user", "content": steered_prompt}],
+                            tokenize=True, add_generation_prompt=True)[1:]
+                        formatted_steered_prompt = self.tokenizer.decode(formatted_steered_prompt)
+                        formatted_prompt = self.tokenizer.apply_chat_template(
+                            system_messages + [{"role": "user", "content": sampled_prompt}],
+                            tokenize=True, add_generation_prompt=True)[1:]
+                        formatted_prompt = self.tokenizer.decode(formatted_prompt)
+
+                        for factor in steering_factors:
+                            all_examples += [[
+                                dataset_name, idx, concept, i, factor,
+                                sampled_prompt, formatted_steered_prompt, formatted_prompt, "", "", "", []
+                            ]]
+                df = pd.DataFrame(
+                    all_examples,
+                    columns=[
+                        'dataset_name', 'concept_id', 'input_concept',
+                        'input_id', 'factor', 'original_prompt', 'steered_input', 'input',
+                        "suppress_original", "suppress_rewrite", "steered_prompt", "defense"
+                    ])
                 all_dfs.append(df)
             
             elif dataset_name == "AlpacaEvalSuppress":
@@ -1182,4 +1250,3 @@ class SteeringDatasetFactory(object):
             all_dfs = pd.concat(all_dfs, ignore_index=True)
             return all_dfs
         return pd.DataFrame()
-

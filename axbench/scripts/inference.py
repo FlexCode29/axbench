@@ -5,6 +5,7 @@
 import os, argparse, yaml, json, glob, pickle, time, itertools, datetime
 import shutil
 import pandas as pd
+import numpy as np
 from tqdm.auto import tqdm
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -135,6 +136,17 @@ def partition_concept_ids(concept_ids, world_size):
     return concept_ids_per_rank
 
 
+def sample_concept_ids(concept_ids, sample_concepts, seed):
+    if sample_concepts is None:
+        return concept_ids
+    sample_concepts = int(sample_concepts)
+    if sample_concepts <= 0 or sample_concepts >= len(concept_ids):
+        return concept_ids
+    rng = np.random.RandomState(seed if seed is not None else 0)
+    selected = sorted(rng.choice(concept_ids, size=sample_concepts, replace=False).tolist())
+    return selected
+
+
 def create_data_latent(dataset_factory, metadata, concept_id, num_of_examples, args):
     # prepare concept related data.
     concept = metadata[concept_id]["concept"]
@@ -226,6 +238,7 @@ def infer_steering(args, rank, world_size, device, logger, training_args, genera
 
     # Get list of all concept_ids
     concept_ids = [metadata[i]["concept_id"] for i in range(len(metadata))]
+    concept_ids = sample_concept_ids(concept_ids, args.sample_concepts, args.seed)
 
     # Partition concept_ids among ranks sequentially
     concept_ids_per_rank = partition_concept_ids(concept_ids, world_size)
@@ -324,7 +337,8 @@ def infer_steering(args, rank, world_size, device, logger, training_args, genera
         tokenizer, dump_dir,
         master_data_dir=args.master_data_dir, lm_client=lm_client,
         lm_model=args.lm_model,
-        has_prompt_steering=has_prompt_steering
+        has_prompt_steering=has_prompt_steering,
+        train_data_dir=args.data_dir,
     )
     is_chat_model = True if args.model_name in CHAT_MODELS else False
     prefix_length = 1 # prefix is default to 1 for all models due to the BOS token.
@@ -1146,4 +1160,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

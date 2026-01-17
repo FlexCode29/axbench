@@ -37,6 +37,7 @@ class DatasetArgs:
     steering_intervention_type: Optional[str] = None
     lm_model: Optional[str] = None
     run_name: Optional[str] = None
+    sample_concepts: Optional[int] = None
     use_bf16: Optional[bool] = False
     dataset_category: Optional[str] = "instruction"
     lm_use_cache: Optional[bool] = True

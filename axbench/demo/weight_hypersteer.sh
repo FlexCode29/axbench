@@ -7,7 +7,19 @@ fi
 
 gpu_count=8
 export DEMO_DIR=axbench/demo_weight
-export OPENAI_API_KEY="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"
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/../.." && pwd)"
+if [[ -f "$repo_root/.env" ]]; then
+    set -a
+    . "$repo_root/.env"
+    set +a
+fi
+
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+    echo "OPENAI_API_KEY is not set. Add it to $repo_root/.env or export it."
+    exit 1
+fi
 
 python axbench/scripts/generate.py \
   --config axbench/demo/sweep/hypersteer_weight_simple.yaml \
