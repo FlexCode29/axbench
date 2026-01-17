@@ -36,7 +36,7 @@ train:
       train_on_negative: false
       exclude_bos: true
       hypernet_name_or_path: "google/gemma-2-2b-it"
-      num_hidden_layers: 4
+      num_hidden_layers: 8
       hypernet_initialize_from_pretrained: false
       weight_target_modules:
         - "model.layers.10.mlp.up_proj.weight"

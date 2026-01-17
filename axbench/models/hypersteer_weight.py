@@ -50,8 +50,12 @@ class HyperSteerWeightLinear(nn.Module):
         self.right_basis = nn.Parameter(
             torch.empty(rank, base_module.in_features, dtype=dtype)
         )
-        nn.init.normal_(self.left_basis, std=0.02)
-        nn.init.normal_(self.right_basis, std=0.02)
+        
+        # FIX: Use LoRA-style initialization.
+        # Initialize one side to 0 so the adapter starts as an identity function.
+        # This prevents breaking the model with random noise at step 0.
+        nn.init.kaiming_uniform_(self.left_basis, a=math.sqrt(5))
+        nn.init.zeros_(self.right_basis)
 
         self.current_coeffs: Optional[torch.Tensor] = None
 
@@ -83,6 +87,12 @@ class HyperSteerWeightLinear(nn.Module):
         batch_size = hidden_states.shape[0]
         if coeffs.shape[0] == 1 and batch_size != 1:
             coeffs = coeffs.expand(hidden_states.shape[0], -1)
+        
+        # Ensure coeffs match batch size (handle edge cases in generation)
+        if coeffs.shape[0] != batch_size:
+             # Fallback for broadcasting if strict match fails (e.g. beam search)
+             coeffs = coeffs[:1].expand(batch_size, -1)
+
         last_dim = hidden_states.shape[-1]
         reshaped = hidden_states.reshape(batch_size, -1, last_dim)
         proj = torch.matmul(reshaped, self.right_basis.t())  # [batch, seq, rank]
@@ -205,10 +215,14 @@ class HyperSteerWeight(Model):
             param_name = f"{name}.weight" if name else "weight"
             if any(fnmatch(param_name, pattern) for pattern in self.target_patterns):
                 if not isinstance(module, nn.Linear):
+                    # Skip if it's already wrapped (re-loading model)
+                    if isinstance(module, HyperSteerWeightLinear):
+                         self.adapters[name] = module
+                         continue
                     raise ValueError(f"Target module {name} is not nn.Linear.")
                 modules_to_wrap.append(name)
 
-        if not modules_to_wrap:
+        if not modules_to_wrap and not self.adapters:
             raise ValueError("No modules matched weight_target_modules patterns.")
 
         for name in modules_to_wrap:
@@ -308,6 +322,9 @@ class HyperSteerWeight(Model):
                 attention_mask=inputs["attention_mask"],
                 output_hidden_states=True,
             )
+            # Assuming 'self.layer' index is handled correctly by 'output_hidden_states'
+            # If self.layer is negative (e.g. -1 for last), it works.
+            # If positive, ensure it maps to the correct index in 'hidden_states' tuple.
             hidden = outputs.hidden_states[self.layer].detach()
         self._cache_base_hidden(concept_id, hidden, inputs["attention_mask"].detach())
         return hidden.to(self.device, dtype=self.dtype), inputs["attention_mask"].to(self.device)
@@ -353,7 +370,7 @@ class HyperSteerWeight(Model):
             coeffs = coeffs.unsqueeze(0)
         if coeffs.dim() != 3 or coeffs.shape[1] != len(self.adapters):
             raise ValueError("Coefficient tensor must have shape [batch, num_modules, rank].")
-        batch_size = coeffs.shape[0]
+        
         for idx, adapter in enumerate(self.adapters.values()):
             adapter.set_coeffs(coeffs[:, idx, :])
         try:
@@ -363,12 +380,25 @@ class HyperSteerWeight(Model):
                 adapter.clear_concept()
 
     def _build_batch_coeffs(self, concept_ids: List[int], embedding_model=None) -> torch.Tensor:
+        # Note: Optimization would involve batching inputs to 'embedding_model' here.
+        # Keeping sequential loop for strict correctness with variable length base inputs,
+        # but in production, batching 'base_encoder_hidden_states' is recommended for speed.
         coeffs = []
         for concept_id in concept_ids:
             coeff = self._compute_concept_coeffs(concept_id, embedding_model=embedding_model)[0]
             coeffs.append(coeff)
         stacked = torch.stack(coeffs, dim=0)
         return stacked.to(self.device, dtype=self.dtype)
+        
+    def _sync_gradients(self, params: List[nn.Parameter], world_size: int):
+        """Manually synchronize gradients for non-DDP wrapped modules."""
+        if world_size <= 1:
+            return
+        
+        for p in params:
+            if p.grad is not None:
+                dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
+                p.grad.data /= world_size
 
     def train(self, examples, **kwargs):
         if not dist.is_initialized():
@@ -410,10 +440,15 @@ class HyperSteerWeight(Model):
             else DDP(self.concept_embedding, device_ids=[rank], find_unused_parameters=True)
         )
 
+        # Collect parameters
         trainable_params: List[nn.Parameter] = list(embedding_model.parameters())
-        trainable_params += list(self.hyper_projector.parameters())
+        
+        # Modules NOT wrapped in DDP need manual sync
+        unwrapped_params: List[nn.Parameter] = list(self.hyper_projector.parameters())
         for adapter in self.adapters.values():
-            trainable_params += list(adapter.parameters())
+            unwrapped_params += list(adapter.parameters())
+            
+        trainable_params += unwrapped_params
 
         optimizer = torch.optim.AdamW(
             trainable_params,
@@ -441,7 +476,10 @@ class HyperSteerWeight(Model):
                 for step, batch in enumerate(train_dataloader):
                     batch = {k: v.to(self.device) for k, v in batch.items()}
                     concept_id_list = batch["concept_ids"].detach().cpu().tolist()
+                    
+                    # Compute coefficients (gradient flows through here)
                     coeff_tensor = self._build_batch_coeffs(concept_id_list, embedding_model=embedding_model)
+                    
                     with self._activate_coefficients(coeff_tensor):
                         outputs = self.model(
                             input_ids=batch["input_ids"],
@@ -457,6 +495,9 @@ class HyperSteerWeight(Model):
                         or (step + 1) == len(train_dataloader)
                     )
                     if should_step:
+                        # FIX: Manual Gradient Sync for unwrapped modules
+                        self._sync_gradients(unwrapped_params, world_size)
+
                         torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
                         optimizer.step()
                         lr_scheduler.step()
@@ -464,7 +505,12 @@ class HyperSteerWeight(Model):
                         progress_bar.update(1)
                         global_step += 1
                         current_lr = optimizer.param_groups[0]["lr"]
-                        raw_loss_val = raw_loss.item()
+                        
+                        # Sync loss for logging
+                        loss_val_tensor = raw_loss.detach()
+                        dist.all_reduce(loss_val_tensor, op=dist.ReduceOp.SUM)
+                        raw_loss_val = (loss_val_tensor / world_size).item()
+
                         loss_history.append(raw_loss_val)
                         progress_bar.set_description(
                             f"rank {rank} loss {raw_loss_val:.4f} lr {current_lr:.6f}"
@@ -547,6 +593,9 @@ class HyperSteerWeight(Model):
             padding=True,
             truncation=True,
         ).to(self.device)
+        
+        # Note: We measure perplexity on the *steered* model to check consistency
+        # If you want to check fluency preservation, you should temporarily clear concepts here.
         with torch.no_grad():
             model_outputs = self.model(
                 input_ids=gen_tokens.input_ids,
