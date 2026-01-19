@@ -25,12 +25,12 @@ train:
     HyperSteerWeight:
       batch_size: 16
       gradient_accumulation_steps: 1
-      n_epochs: 3
+      n_epochs: 10
       lr: 0.001
-      lr_decay_start_step: 4000
+      lr_decay_start_step: 1700
       lr_min: 0.0
       weight_decay: 0.0
-      low_rank_dimension: 4
+      low_rank_dimension: 64
       intervention_positions: "all"
       binarize_dataset: false
       train_on_negative: false
@@ -62,7 +62,7 @@ inference:
   # steering related params
   steering_intervention_type: "weight"
   steering_model_name: "google/gemma-2-2b-it"
-  steering_datasets: ["TrainData"]
+  steering_datasets: ["AlpacaEval"]
   steering_batch_size: 8
   steering_output_length: 128
   steering_layers: [10]

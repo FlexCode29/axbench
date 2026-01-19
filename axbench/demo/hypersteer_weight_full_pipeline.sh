@@ -21,7 +21,7 @@ fi
 gpu_count=8
 config_path="axbench/demo/sweep/hypersteer_weight_full_pipeline.yaml"
 dump_dir="axbench/16k_full_pipeline_results"
-pregen_dir="axbench/concept16k/prod_2b_l20_v1"
+pregen_dir="axbench/concept500/prod_2b_l10_v1"
 
 if [[ ! -f "$pregen_dir/generate/train_data.parquet" || ! -f "$pregen_dir/generate/metadata.jsonl" ]]; then
     echo "Pre-generated data not found in $pregen_dir/generate."

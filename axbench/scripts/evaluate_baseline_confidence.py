@@ -3,7 +3,7 @@
 Compute confidence that a model beats a baseline using evaluate outputs.
 
 Example:
-python axbench/scripts/evaluate_baseline_confidence.py --dump_dir axbench/full_pipeline_results --mode steering --baseline HyperSteerWeight --baseline-factor 0.0
+python axbench/scripts/evaluate_baseline_confidence.py --dump_dir axbench/archive_of_runs/meh_extra_long_good_code_16k_full_pipeline_results --mode steering --baseline HyperSteerWeight --baseline-factor 0.0
 """
 import argparse
 import json
