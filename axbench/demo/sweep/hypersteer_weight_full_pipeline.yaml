@@ -62,12 +62,12 @@ inference:
   # steering related params
   steering_intervention_type: "weight"
   steering_model_name: "google/gemma-2-2b-it"
-  steering_datasets: ["AlpacaEval"]
+  steering_datasets: ["TrainData"]
   steering_batch_size: 8
   steering_output_length: 128
   steering_layers: [10]
   steering_num_of_examples: 10
-  steering_factors: [0.0, 1.0, 2.0, 5.0]
+  steering_factors: [0.0, 1.0]
   sample_concepts: 500
   master_data_dir: "axbench/data"
   seed: 42

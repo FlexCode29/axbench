@@ -31,9 +31,6 @@ METADATA_FILE = "metadata.jsonl"
 class HyperSteerWeightLinear(nn.Module):
     """
     Wraps an existing Linear layer with a concept-conditioned low-rank update.
-
-    The hypernetwork sets `current_coeffs` before each forward pass which gates a
-    shared low-rank basis to produce the weight update without materializing it.
     """
 
     def __init__(self, base_module: nn.Linear, rank: int, dtype: torch.dtype):
@@ -51,9 +48,8 @@ class HyperSteerWeightLinear(nn.Module):
             torch.empty(rank, base_module.in_features, dtype=dtype)
         )
         
-        # FIX: Use LoRA-style initialization.
-        # Initialize one side to 0 so the adapter starts as an identity function.
-        # This prevents breaking the model with random noise at step 0.
+        # LoRA-style initialization
+        # Left = Kaiming, Right = Zero -> Starts as Identity function
         nn.init.kaiming_uniform_(self.left_basis, a=math.sqrt(5))
         nn.init.zeros_(self.right_basis)
 
@@ -84,18 +80,21 @@ class HyperSteerWeightLinear(nn.Module):
         coeffs = self.current_coeffs
         if coeffs is None:
             return base_out
+        
+        # Optimization: If coeffs are zero, skip computation
+        if torch.all(coeffs == 0):
+            return base_out
+
         batch_size = hidden_states.shape[0]
         if coeffs.shape[0] == 1 and batch_size != 1:
             coeffs = coeffs.expand(hidden_states.shape[0], -1)
         
-        # Ensure coeffs match batch size (handle edge cases in generation)
         if coeffs.shape[0] != batch_size:
-             # Fallback for broadcasting if strict match fails (e.g. beam search)
              coeffs = coeffs[:1].expand(batch_size, -1)
 
         last_dim = hidden_states.shape[-1]
         reshaped = hidden_states.reshape(batch_size, -1, last_dim)
-        proj = torch.matmul(reshaped, self.right_basis.t())  # [batch, seq, rank]
+        proj = torch.matmul(reshaped, self.right_basis.t()) 
         scaled = proj * coeffs.unsqueeze(1)
         delta = torch.matmul(scaled, self.left_basis)
         delta = delta.reshape_as(base_out)
@@ -215,7 +214,6 @@ class HyperSteerWeight(Model):
             param_name = f"{name}.weight" if name else "weight"
             if any(fnmatch(param_name, pattern) for pattern in self.target_patterns):
                 if not isinstance(module, nn.Linear):
-                    # Skip if it's already wrapped (re-loading model)
                     if isinstance(module, HyperSteerWeightLinear):
                          self.adapters[name] = module
                          continue
@@ -322,9 +320,6 @@ class HyperSteerWeight(Model):
                 attention_mask=inputs["attention_mask"],
                 output_hidden_states=True,
             )
-            # Assuming 'self.layer' index is handled correctly by 'output_hidden_states'
-            # If self.layer is negative (e.g. -1 for last), it works.
-            # If positive, ensure it maps to the correct index in 'hidden_states' tuple.
             hidden = outputs.hidden_states[self.layer].detach()
         self._cache_base_hidden(concept_id, hidden, inputs["attention_mask"].detach())
         return hidden.to(self.device, dtype=self.dtype), inputs["attention_mask"].to(self.device)
@@ -362,7 +357,10 @@ class HyperSteerWeight(Model):
         pooled = self._pool_hidden(outputs, hyper_inputs["attention_mask"])
         logits = self.hyper_projector(pooled)
         coeffs = logits.view(-1, len(self.adapters), self.low_rank_dimension)
-        return torch.tanh(coeffs)
+        
+        # MODIFIED: Scaled Tanh to allow larger dynamic range.
+        # This gives the model 10x leverage to "shout" over the base model weights.
+        return torch.tanh(coeffs) * 10.0
 
     @contextmanager
     def _activate_coefficients(self, coeffs: torch.Tensor):
@@ -380,9 +378,6 @@ class HyperSteerWeight(Model):
                 adapter.clear_concept()
 
     def _build_batch_coeffs(self, concept_ids: List[int], embedding_model=None) -> torch.Tensor:
-        # Note: Optimization would involve batching inputs to 'embedding_model' here.
-        # Keeping sequential loop for strict correctness with variable length base inputs,
-        # but in production, batching 'base_encoder_hidden_states' is recommended for speed.
         coeffs = []
         for concept_id in concept_ids:
             coeff = self._compute_concept_coeffs(concept_id, embedding_model=embedding_model)[0]
@@ -391,14 +386,57 @@ class HyperSteerWeight(Model):
         return stacked.to(self.device, dtype=self.dtype)
         
     def _sync_gradients(self, params: List[nn.Parameter], world_size: int):
-        """Manually synchronize gradients for non-DDP wrapped modules."""
         if world_size <= 1:
             return
-        
         for p in params:
             if p.grad is not None:
                 dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
                 p.grad.data /= world_size
+
+    def _log_generations(self, batch, embedding_model, step, wandb_run):
+        """Samples 1 example, generates steered vs unsteered, and logs to WandB."""
+        # 1. Aggressive Cleanup to prevent OOM
+        torch.cuda.empty_cache()
+        
+        # 2. Unwrap DDP Model (Critical for .generate memory overhead)
+        # Using .module prevents duplicating the wrapper overhead
+        raw_model = self.model.module if hasattr(self.model, "module") else self.model
+        
+        # 3. Process only ONE example to save memory
+        input_ids = batch["input_ids"][:1] 
+        concept_ids = batch["concept_ids"][:1].detach().cpu().tolist()
+        
+        prompts = self.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
+        concepts = [self.concept_id_to_text.get(cid, str(cid)) for cid in concept_ids]
+        
+        # 4. Inference Mode (Saves more memory than no_grad)
+        with torch.inference_mode():
+            # Base Gen
+            base_gens, base_ppls = self._generate(prompts, max_new_tokens=32, temperature=0.7)
+            
+            # Steered Gen
+            coeffs = self._build_batch_coeffs(concept_ids, embedding_model=embedding_model)
+            with self._activate_coefficients(coeffs):
+                # We reuse the helper _generate but we need to ensure it doesn't leak.
+                # Actually, calling raw_model.generate directly is safer here to avoid
+                # any hook overheads from the wrapper class if they exist.
+                
+                inputs = self._prepare_generation(prompts)
+                outputs = raw_model.generate(**inputs, max_new_tokens=32, do_sample=True, temperature=0.7)
+                steered_gens = [self.tokenizer.decode(o, skip_special_tokens=True) for o in outputs]
+                # Skip detailed PPL calc for speed/memory if OOM is tight during logging
+                steered_ppls = [0.0] 
+
+        # 5. Log
+        import wandb
+        columns = ["Step", "Concept", "Input", "Base Gen", "Steered Gen"]
+        data = [[step, concepts[0], prompts[0][:50], base_gens[0][-100:], steered_gens[0][-100:]]]
+        
+        wandb_run.log({"eval/completions": wandb.Table(columns=columns, data=data)}, step=step)
+        
+        # 6. Final Cleanup
+        del raw_model, coeffs, inputs, outputs, steered_gens, base_gens
+        torch.cuda.empty_cache()
 
     def train(self, examples, **kwargs):
         if not dist.is_initialized():
@@ -411,18 +449,10 @@ class HyperSteerWeight(Model):
         wandb_run = None
         if log_to_wandb:
             import wandb
-
             run_name = kwargs.get("run_name") or f"{self.__str__()}_{self.layer}"
-            wandb_project = kwargs.get("wandb_project")
-            wandb_name = kwargs.get("wandb_name")
-            wandb_init_kwargs = {
-                "dir": "wandb",
-                "name": run_name,
-            }
-            if wandb_project:
-                wandb_init_kwargs["project"] = wandb_project
-            if wandb_name:
-                wandb_init_kwargs["entity"] = wandb_name
+            wandb_init_kwargs = {"dir": "wandb", "name": run_name}
+            if kwargs.get("wandb_project"): wandb_init_kwargs["project"] = kwargs.get("wandb_project")
+            if kwargs.get("wandb_name"): wandb_init_kwargs["entity"] = kwargs.get("wandb_name")
             wandb_run = wandb.init(**wandb_init_kwargs)
 
         train_dataloader, train_sampler = self.make_dataloader(
@@ -440,14 +470,12 @@ class HyperSteerWeight(Model):
             else DDP(self.concept_embedding, device_ids=[rank], find_unused_parameters=True)
         )
 
-        # Collect parameters
+        # Explicitly select ONLY trainable params
         trainable_params: List[nn.Parameter] = list(embedding_model.parameters())
-        
-        # Modules NOT wrapped in DDP need manual sync
         unwrapped_params: List[nn.Parameter] = list(self.hyper_projector.parameters())
         for adapter in self.adapters.values():
-            unwrapped_params += list(adapter.parameters())
-            
+            unwrapped_params.append(adapter.left_basis)
+            unwrapped_params.append(adapter.right_basis)
         trainable_params += unwrapped_params
 
         optimizer = torch.optim.AdamW(
@@ -455,10 +483,7 @@ class HyperSteerWeight(Model):
             lr=self.training_args.lr,
             weight_decay=self.training_args.weight_decay,
         )
-        steps_per_epoch = max(
-            1,
-            math.ceil(len(train_dataloader) / self.training_args.gradient_accumulation_steps),
-        )
+        steps_per_epoch = max(1, math.ceil(len(train_dataloader) / self.training_args.gradient_accumulation_steps))
         num_training_steps = self.training_args.n_epochs * steps_per_epoch
         lr_scheduler = self._build_lr_scheduler(optimizer, num_training_steps)
 
@@ -469,6 +494,13 @@ class HyperSteerWeight(Model):
         optimizer.zero_grad()
         global_step = 0
         loss_history: List[float] = []
+        
+        # Loss function setup for Focal Loss
+        ce_loss_fct = nn.CrossEntropyLoss(reduction='none')
+        focal_gamma = 2.0
+        
+        eval_every_steps = kwargs.get("eval_every_steps", 100)
+
         try:
             for epoch in range(self.training_args.n_epochs):
                 if train_sampler is not None:
@@ -477,7 +509,6 @@ class HyperSteerWeight(Model):
                     batch = {k: v.to(self.device) for k, v in batch.items()}
                     concept_id_list = batch["concept_ids"].detach().cpu().tolist()
                     
-                    # Compute coefficients (gradient flows through here)
                     coeff_tensor = self._build_batch_coeffs(concept_id_list, embedding_model=embedding_model)
                     
                     with self._activate_coefficients(coeff_tensor):
@@ -486,47 +517,69 @@ class HyperSteerWeight(Model):
                             attention_mask=batch["attention_mask"],
                             labels=batch["labels"],
                         )
-                    raw_loss = outputs.loss.mean()
+                    
+                    # --- FOCAL LOSS ---
+                    logits = outputs.logits
+                    labels = batch["labels"]
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    shift_labels = labels[..., 1:].contiguous()
+
+                    ce_loss = ce_loss_fct(
+                        shift_logits.view(-1, shift_logits.size(-1)), 
+                        shift_labels.view(-1)
+                    )
+                    
+                    pt = torch.exp(-ce_loss)
+                    focal_loss = ((1 - pt) ** focal_gamma) * ce_loss
+                    active_loss = shift_labels.view(-1) != -100
+                    
+                    if active_loss.sum() > 0:
+                        raw_loss = focal_loss[active_loss].mean()
+                        with torch.no_grad():
+                            true_ppl_val = torch.exp(ce_loss[active_loss].mean()).item()
+                    else:
+                        raw_loss = torch.tensor(0.0).to(self.device)
+                        true_ppl_val = 0.0
+                    
                     loss = raw_loss / self.training_args.gradient_accumulation_steps
                     loss.backward()
 
-                    should_step = (
-                        (step + 1) % self.training_args.gradient_accumulation_steps == 0
-                        or (step + 1) == len(train_dataloader)
-                    )
+                    # CRITICAL: Delete graph before stepping optimizer to free max memory
+                    del logits, shift_logits, outputs, ce_loss, focal_loss
+                    
+                    should_step = ((step + 1) % self.training_args.gradient_accumulation_steps == 0 or (step + 1) == len(train_dataloader))
                     if should_step:
-                        # FIX: Manual Gradient Sync for unwrapped modules
                         self._sync_gradients(unwrapped_params, world_size)
-
                         torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
+                        
                         optimizer.step()
                         lr_scheduler.step()
-                        optimizer.zero_grad()
+                        # set_to_none=True releases memory faster than zero_grad()
+                        optimizer.zero_grad(set_to_none=True)
+                        
                         progress_bar.update(1)
                         global_step += 1
-                        current_lr = optimizer.param_groups[0]["lr"]
                         
-                        # Sync loss for logging
+                        # Logging Stats
+                        current_lr = optimizer.param_groups[0]["lr"]
                         loss_val_tensor = raw_loss.detach()
                         dist.all_reduce(loss_val_tensor, op=dist.ReduceOp.SUM)
                         raw_loss_val = (loss_val_tensor / world_size).item()
-
                         loss_history.append(raw_loss_val)
-                        progress_bar.set_description(
-                            f"rank {rank} loss {raw_loss_val:.4f} lr {current_lr:.6f}"
-                        )
+                        progress_bar.set_description(f"rank {rank} loss {raw_loss_val:.4f} lr {current_lr:.6f}")
+                        
                         if log_to_wandb and wandb_run is not None:
-                            epoch_progress = epoch + (step / max(1, len(train_dataloader)))
-                            loss_std = pstdev(loss_history) if len(loss_history) > 1 else 0.0
-                            wandb.log(
-                                {
-                                    "train/loss": raw_loss_val,
-                                    "train/loss_std": loss_std,
-                                    "train/learning_rate": current_lr,
-                                    "train/epoch": epoch_progress,
-                                },
-                                step=global_step,
-                            )
+                            wandb.log({
+                                "train/focal_loss": raw_loss_val,
+                                "train/perplexity": true_ppl_val,
+                                "train/learning_rate": current_lr
+                            }, step=global_step)
+                            
+                            # GENERATION LOGGING (Clean-Room Approach)
+                            # Run only when GPU is absolutely empty after zero_grad
+                            if global_step % eval_every_steps == 0:
+                                self._log_generations(batch, embedding_model, global_step, wandb_run)
+
         finally:
             progress_bar.close()
             if wandb_run is not None:
@@ -543,76 +596,40 @@ class HyperSteerWeight(Model):
         else:
             min_lr = max(0.0, min(min_lr, base_lr))
             min_factor = min_lr / base_lr if base_lr > 0 else 0.0
-
         if decay_start >= total_steps or min_factor == 1.0:
             return LambdaLR(optimizer, lambda step: 1.0)
-
         decay_range = max(1, total_steps - decay_start)
-
         def lr_lambda(step: int) -> float:
-            if step <= decay_start:
-                return 1.0
+            if step <= decay_start: return 1.0
             decay_progress = min(step - decay_start, decay_range)
-            ratio = decay_progress / decay_range
-            return 1.0 - (1.0 - min_factor) * ratio
-
+            return 1.0 - (1.0 - min_factor) * (decay_progress / decay_range)
         return LambdaLR(optimizer, lr_lambda)
 
     def _prepare_generation(self, texts: List[str]) -> Dict[str, torch.Tensor]:
         prev_padding = self.tokenizer.padding_side
         self.tokenizer.padding_side = "left"
-        encoded = self.tokenizer(
-            texts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        ).to(self.device)
+        encoded = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
         self.tokenizer.padding_side = prev_padding
         return encoded
 
     def _generate(self, prompts: List[str], max_new_tokens: int, temperature: float) -> Tuple[List[str], torch.Tensor]:
         inputs = self._prepare_generation(prompts)
-        outputs = self.model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=True,
-            temperature=temperature,
-        )
+        outputs = self.model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=True, temperature=temperature)
         input_lengths = [len(ids) for ids in inputs.input_ids]
-        generations = [
-            self.tokenizer.decode(out[input_len:], skip_special_tokens=True)
-            for out, input_len in zip(outputs, input_lengths)
-        ]
-
-        decoded_full = [
-            self.tokenizer.decode(out, skip_special_tokens=True) for out in outputs
-        ]
-        gen_tokens = self.tokenizer(
-            decoded_full,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        ).to(self.device)
+        generations = [self.tokenizer.decode(out[input_len:], skip_special_tokens=True) for out, input_len in zip(outputs, input_lengths)]
         
-        # Note: We measure perplexity on the *steered* model to check consistency
-        # If you want to check fluency preservation, you should temporarily clear concepts here.
+        # PPL calc on generated text
+        decoded_full = [self.tokenizer.decode(out, skip_special_tokens=True) for out in outputs]
+        gen_tokens = self.tokenizer(decoded_full, return_tensors="pt", padding=True, truncation=True).to(self.device)
+        
         with torch.no_grad():
-            model_outputs = self.model(
-                input_ids=gen_tokens.input_ids,
-                attention_mask=gen_tokens.attention_mask,
-            )
+            model_outputs = self.model(input_ids=gen_tokens.input_ids, attention_mask=gen_tokens.attention_mask)
         logits = model_outputs.logits[:, :-1, :].contiguous()
         targets = gen_tokens.input_ids[:, 1:].contiguous()
         loss_fct = nn.CrossEntropyLoss(reduction="none")
-        token_losses = loss_fct(
-            logits.view(-1, logits.size(-1)),
-            targets.view(-1),
-        )
-        token_losses = token_losses.view(targets.size())
+        token_losses = loss_fct(logits.view(-1, logits.size(-1)), targets.view(-1)).view(targets.size())
         mask = gen_tokens.attention_mask[:, 1:]
-        seq_lengths = mask.sum(dim=1)
-        seq_loss = (token_losses * mask).sum(dim=1) / seq_lengths.clamp(min=1)
-        perplexities = torch.exp(seq_loss)
+        perplexities = torch.exp((token_losses * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1))
         return generations, perplexities.detach().cpu()
 
     @torch.no_grad()
@@ -637,12 +654,13 @@ class HyperSteerWeight(Model):
                     batch_indices = idxs[start : start + batch_size]
                     prompts = factor_df.loc[batch_indices, "input"].tolist()
                     scaled_coeffs = coeffs * factor
-                    with self._activate_coefficients(scaled_coeffs):
-                        generations, perplexities = self._generate(
-                            prompts,
-                            max_new_tokens=eval_output_length,
-                            temperature=temperature,
-                        )
+                    
+                    if factor == 0:
+                        generations, perplexities = self._generate(prompts, max_new_tokens=eval_output_length, temperature=temperature)
+                    else:
+                        with self._activate_coefficients(scaled_coeffs):
+                            generations, perplexities = self._generate(prompts, max_new_tokens=eval_output_length, temperature=temperature)
+                            
                     for local_idx, text in zip(batch_indices, generations):
                         results_generations[local_idx] = text
                     for local_idx, ppl in zip(batch_indices, perplexities.tolist()):
