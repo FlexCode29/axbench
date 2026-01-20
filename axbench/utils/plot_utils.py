@@ -108,7 +108,7 @@ def plot_aggregated_roc(jsonl_data, write_to_path=None, report_to=[], wandb_name
         )})
 
 
-def plot_metrics(jsonl_data, configs, write_to_path=None, report_to=[], wandb_name=None, mode=None):
+def plot_metrics(jsonl_data, configs, write_to_path=None, report_to=[], wandb_name=None, mode=None, sample_size=None):
     # Collect data into a list
     data = []
     for config in configs:
@@ -144,7 +144,10 @@ def plot_metrics(jsonl_data, configs, write_to_path=None, report_to=[], wandb_na
         N=('Value', 'count'),
     )
     grouped['Std'] = grouped['Std'].fillna(0)
-    grouped['CI'] = 1.645 * grouped['Std'] / grouped['N'].clip(lower=1).pow(0.5)
+    effective_n = grouped['N'].clip(lower=1)
+    if sample_size is not None:
+        effective_n = effective_n * max(int(sample_size), 1)
+    grouped['CI'] = 1.645 * grouped['Std'] / effective_n.pow(0.5)
 
     # Apply log transformation if needed
     grouped['TransformedValue'] = grouped.apply(

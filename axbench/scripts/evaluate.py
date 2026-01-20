@@ -304,7 +304,7 @@ def process_jsonl_file(jsonl_lines):
     return jsonl_lines
 
 
-def plot_steering(aggregated_results, dump_dir, report_to=[], wandb_name=None, mode=None, rule = False):
+def plot_steering(aggregated_results, dump_dir, report_to=[], wandb_name=None, mode=None, rule=False, sample_size=None):
     try:
         configs = [
             # {
@@ -356,7 +356,8 @@ def plot_steering(aggregated_results, dump_dir, report_to=[], wandb_name=None, m
             write_to_path=dump_dir, 
             report_to=report_to,
             wandb_name=wandb_name,
-            mode=mode
+            mode=mode,
+            sample_size=sample_size
         )
 
     except Exception as e:
@@ -642,7 +643,22 @@ def eval_steering(args):
 
     # Generate final plot
     logger.warning("Generating final plot...")
-    plot_steering(aggregated_results, dump_dir, args.report_to, args.wandb_name, args.mode)
+    sample_size = None
+    data_path = os.path.join(dump_dir, f"{args.mode}_data.parquet")
+    if os.path.exists(data_path):
+        try:
+            df = pd.read_parquet(data_path, columns=["concept_id", "input_id"])
+            sample_size = df.drop_duplicates(subset=["concept_id", "input_id"]).shape[0]
+        except Exception as exc:
+            logger.warning(f"Failed to compute sample size from {data_path}: {exc}")
+    plot_steering(
+        aggregated_results,
+        dump_dir,
+        args.report_to,
+        args.wandb_name,
+        args.mode,
+        sample_size=sample_size,
+    )
     plot_metrics_multiple_datasets(os.path.join(dump_dir, "steering_data.parquet"), dump_dir, args.report_to, args.wandb_name, args.mode, rule = args.steer_data_type=="rule")
     #plot_metrics_multiple_datasets(os.path.join(dump_dir, "steering_data.parquet"), dump_dir, args.report_to, args.wandb_name, args.mode, rule = args.steer_data_type=="rule")
     logger.warning("Evaluation completed!")

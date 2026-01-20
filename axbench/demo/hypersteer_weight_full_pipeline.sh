@@ -29,10 +29,10 @@ if [[ ! -f "$pregen_dir/generate/train_data.parquet" || ! -f "$pregen_dir/genera
     exit 1
 fi
 
-#torchrun --nproc_per_node="$gpu_count" axbench/scripts/train.py \
-#  --config "$config_path" \
-#  --dump_dir "$dump_dir" \
-#  --overwrite_data_dir "$pregen_dir/generate"
+torchrun --nproc_per_node="$gpu_count" axbench/scripts/train.py \
+  --config "$config_path" \
+  --dump_dir "$dump_dir" \
+  --overwrite_data_dir "$pregen_dir/generate"
 
 
 torchrun --nproc_per_node="$gpu_count" axbench/scripts/inference.py \
