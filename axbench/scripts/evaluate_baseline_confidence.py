@@ -3,7 +3,7 @@
 Compute confidence that a model beats a baseline using evaluate outputs.
 
 Example:
-python axbench/scripts/evaluate_baseline_confidence.py --dump_dir axbench/archive_of_runs/500_crazy_low_loss_full_pipeline_results --mode steering --baseline HyperSteerWeight --baseline-factor 0.0
+python axbench/scripts/evaluate_baseline_confidence.py --dump_dir axbench/archive_of_runs/500_fast_prompt_only_ST310_RESULTS --mode steering --baseline HyperSteerWeight --baseline-factor 0.0
 """
 import argparse
 import json
@@ -131,7 +131,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    evaluate_dir = Path(args.dump_dir) / "evaluate"
+    evaluate_dir = Path(args.dump_dir) / "test_evaluate"
     jsonl_path = evaluate_dir / f"{args.mode}.jsonl"
     parquet_path = evaluate_dir / f"{args.mode}_data.parquet"
     if not parquet_path.exists():
@@ -271,6 +271,20 @@ def main():
                     f" p_value_one_sided={p_value:.4g}"
                     f" confidence={confidence:.4g}"
                 )
+                lines.append("")
+                model_concept_means = model_df.groupby("concept_id")[model_col].mean()
+                baseline_concept_means = baseline_df.groupby("concept_id")[model_col].mean()
+                parquet_concepts = sorted(
+                    set(model_concept_means.index) & set(baseline_concept_means.index)
+                )
+                if not parquet_concepts:
+                    lines.append("  avg_concept_score_parquet: no paired concepts")
+                else:
+                    avg_factor1 = model_concept_means.loc[parquet_concepts].mean()
+                    avg_factor0 = baseline_concept_means.loc[parquet_concepts].mean()
+                    lines.append("  avg_concept_score_parquet:")
+                    lines.append(f"    baseline_factor0={avg_factor0:.4f}")
+                    lines.append(f"    factor1={avg_factor1:.4f}")
         lines.append("")
 
     output_path = Path(args.output) if args.output else evaluate_dir / f"confidence_vs_{args.baseline}.txt"

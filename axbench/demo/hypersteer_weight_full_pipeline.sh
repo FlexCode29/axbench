@@ -20,8 +20,8 @@ fi
 
 gpu_count=8
 config_path="axbench/demo/sweep/hypersteer_weight_full_pipeline.yaml"
-dump_dir="axbench/16k_full_pipeline_results"
-pregen_dir="axbench/concept500/prod_2b_l10_v1"
+dump_dir="axbench/500_fast_prompt_only"
+pregen_dir="axbench/demo_weight"
 
 if [[ ! -f "$pregen_dir/generate/train_data.parquet" || ! -f "$pregen_dir/generate/metadata.jsonl" ]]; then
     echo "Pre-generated data not found in $pregen_dir/generate."
@@ -29,6 +29,10 @@ if [[ ! -f "$pregen_dir/generate/train_data.parquet" || ! -f "$pregen_dir/genera
     exit 1
 fi
 
+#torchrun --nproc_per_node="$gpu_count" axbench/scripts/train.py \
+#  --config "$config_path" \
+#  --dump_dir "$dump_dir" \
+#  --overwrite_data_dir "$pregen_dir/generate"
 
 
 torchrun --nproc_per_node="$gpu_count" axbench/scripts/inference.py \

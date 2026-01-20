@@ -407,6 +407,9 @@ class HyperSteerWeight(Model):
         concept_ids = batch["concept_ids"][:1].detach().cpu().tolist()
         
         prompts = self.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
+        # Extract text before "\nmodel\n"
+        prompts = [p.split("\nmodel\n", 1)[0] for p in prompts]
+
         concepts = [self.concept_id_to_text.get(cid, str(cid)) for cid in concept_ids]
         
         # 4. Inference Mode (Saves more memory than no_grad)
@@ -430,7 +433,7 @@ class HyperSteerWeight(Model):
         # 5. Log
         import wandb
         columns = ["Step", "Concept", "Input", "Base Gen", "Steered Gen"]
-        data = [[step, concepts[0], prompts[0][:50], base_gens[0][-100:], steered_gens[0][-100:]]]
+        data = [[step, concepts[0], prompts[0], base_gens[0], steered_gens[0]]]
         
         wandb_run.log({"eval/completions": wandb.Table(columns=columns, data=data)}, step=step)
         
@@ -495,11 +498,10 @@ class HyperSteerWeight(Model):
         global_step = 0
         loss_history: List[float] = []
         
-        # Loss function setup for Focal Loss
+        # Loss function setup for Standard CE Loss
         ce_loss_fct = nn.CrossEntropyLoss(reduction='none')
-        focal_gamma = 2.0
         
-        eval_every_steps = kwargs.get("eval_every_steps", 100)
+        eval_every_steps = kwargs.get("eval_every_steps", 50)
 
         try:
             for epoch in range(self.training_args.n_epochs):
@@ -518,7 +520,7 @@ class HyperSteerWeight(Model):
                             labels=batch["labels"],
                         )
                     
-                    # --- FOCAL LOSS ---
+                    # --- STANDARD CE LOSS ---
                     logits = outputs.logits
                     labels = batch["labels"]
                     shift_logits = logits[..., :-1, :].contiguous()
@@ -529,14 +531,12 @@ class HyperSteerWeight(Model):
                         shift_labels.view(-1)
                     )
                     
-                    pt = torch.exp(-ce_loss)
-                    focal_loss = ((1 - pt) ** focal_gamma) * ce_loss
                     active_loss = shift_labels.view(-1) != -100
                     
                     if active_loss.sum() > 0:
-                        raw_loss = focal_loss[active_loss].mean()
+                        raw_loss = ce_loss[active_loss].mean()
                         with torch.no_grad():
-                            true_ppl_val = torch.exp(ce_loss[active_loss].mean()).item()
+                            true_ppl_val = torch.exp(raw_loss).item()
                     else:
                         raw_loss = torch.tensor(0.0).to(self.device)
                         true_ppl_val = 0.0
@@ -545,7 +545,7 @@ class HyperSteerWeight(Model):
                     loss.backward()
 
                     # CRITICAL: Delete graph before stepping optimizer to free max memory
-                    del logits, shift_logits, outputs, ce_loss, focal_loss
+                    del logits, shift_logits, outputs, ce_loss
                     
                     should_step = ((step + 1) % self.training_args.gradient_accumulation_steps == 0 or (step + 1) == len(train_dataloader))
                     if should_step:
@@ -570,14 +570,14 @@ class HyperSteerWeight(Model):
                         
                         if log_to_wandb and wandb_run is not None:
                             wandb.log({
-                                "train/focal_loss": raw_loss_val,
+                                "train/loss": raw_loss_val,
                                 "train/perplexity": true_ppl_val,
                                 "train/learning_rate": current_lr
                             }, step=global_step)
                             
                             # GENERATION LOGGING (Clean-Room Approach)
                             # Run only when GPU is absolutely empty after zero_grad
-                            if global_step % eval_every_steps == 0:
+                            if global_step % eval_every_steps == 0 or global_step == 1:
                                 self._log_generations(batch, embedding_model, global_step, wandb_run)
 
         finally:

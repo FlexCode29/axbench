@@ -25,6 +25,11 @@ axbench/old_demoes
 
 axbench/archive_of_runs
 axbench/16k_full_pipeline_results
+axbench/500_fast_correct_save_load
+axbench/500_fast_no_leak
+axbench/500_fast_no_leak_extended
+axbench/500_fast_prompt_only
+
 
 axbench/scripts/train_fsdp.py
 axbench/sweep/wuzhengx/9b/l20/sft.yaml

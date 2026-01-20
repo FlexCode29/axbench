@@ -19,7 +19,7 @@ train:
   use_wandb: true
   wandb_project: "hypersteer"
   wandb_name: "marcomolinari4"
-  run_name: "64r_500exs_allweight_10l_2b"
+  run_name: "64r_500_small_fast_allweight_10l_2b_prompt_only"
   output_length: 128
   models:
     HyperSteerWeight:
@@ -27,7 +27,7 @@ train:
       gradient_accumulation_steps: 1
       n_epochs: 10
       lr: 0.001
-      lr_decay_start_step: 1700
+      lr_decay_start_step: 600
       lr_min: 0.0
       weight_decay: 0.0
       low_rank_dimension: 64
@@ -62,13 +62,13 @@ inference:
   # steering related params
   steering_intervention_type: "weight"
   steering_model_name: "google/gemma-2-2b-it"
-  steering_datasets: ["TrainData"]
+  steering_datasets: ["TrainData"] # AlpacaEval or TrainData
   steering_batch_size: 8
   steering_output_length: 128
   steering_layers: [10]
   steering_num_of_examples: 10
-  steering_factors: [0.0, 1.0]
-  sample_concepts: 500
+  steering_factors: [0.0, 0.2, 0.5, 1.0, 3.0]
+  sample_concepts: 30
   master_data_dir: "axbench/data"
   seed: 42
   lm_model: "gpt-4o-mini"
@@ -88,7 +88,5 @@ evaluate:
   num_of_workers: 32
   lm_model: "gpt-4o-mini"
   run_winrate: false
-  sample_concepts: 500
-  sample_examples: 10
   winrate_baseline: "PromptSteering"
   master_data_dir: "axbench/data"
