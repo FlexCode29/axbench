@@ -24,14 +24,13 @@ config_root="axbench/demo/ablations/ablations"
 dump_root="axbench/demo/ablations/dumps"
 
 runs=(
-  "baseline_concept500|$config_root/baseline_concept500.yaml|axbench/concept500/prod_2b_l20_v1"
-  "ablate_rank_r1|$config_root/ablate_rank_r1.yaml|axbench/concept500/prod_2b_l20_v1"
-  "ablate_epochs_1|$config_root/ablate_epochs_1.yaml|axbench/concept500/prod_2b_l20_v1"
-  "ablate_layer_l20|$config_root/ablate_layer_l20.yaml|axbench/concept500/prod_2b_l20_v1"
-  "ablate_num_layers_1|$config_root/ablate_num_layers_1.yaml|axbench/concept500/prod_2b_l20_v1"
-  "ablate_hnet_depth_4|$config_root/ablate_hnet_depth_4.yaml|axbench/concept500/prod_2b_l20_v1"
-  "ablate_trainset_concept16k|$config_root/ablate_trainset_concept16k.yaml|axbench/concept16k/prod_2b_l20_v1"
-  "ablate_gemma_9b_l20|$config_root/ablate_gemma_9b_l20.yaml|axbench/concept500/prod_9b_l20_v1"
+  "baseline_concept500|$config_root/baseline_concept500.yaml|axbench/demo_weight"
+  "ablate_rank_r1|$config_root/ablate_rank_r1.yaml|axbench/demo_weight"
+  "ablate_epochs_3|$config_root/ablate_epochs_3.yaml|axbench/demo_weight"
+  "ablate_layer_l20|$config_root/ablate_layer_l20.yaml|axbench/demo_weight"
+  "ablate_num_layers_2|$config_root/ablate_num_layers_2.yaml|axbench/demo_weight"
+  "ablate_hnet_depth_4|$config_root/ablate_hnet_depth_4.yaml|axbench/demo_weight"
+  "ablate_gemma_9b_l20|$config_root/ablate_gemma_9b_l20.yaml|axbench/demo_weight"
 )
 
 for entry in "${runs[@]}"; do

@@ -3,7 +3,7 @@ generate:
   output_length: 128
   num_of_examples: 144
   concept_path: "axbench/data/gemma-2-2b_20-gemmascope-res-16k.json"
-  max_concepts: 500
+  max_concepts: 16000
   dataset_category: "instruction"
   master_data_dir: "axbench/data"
   lm_use_cache: false
@@ -19,18 +19,18 @@ train:
   use_wandb: true
   wandb_project: "hypersteer"
   wandb_name: "marcomolinari4"
-  run_name: "ablation_hnet_depth_4"
+  run_name: "ablate_hnet_depth_4"
   output_length: 128
   models:
     HyperSteerWeight:
       batch_size: 16
       gradient_accumulation_steps: 1
-      n_epochs: 3
+      n_epochs: 10
       lr: 0.001
-      lr_decay_start_step: 4000
+      lr_decay_start_step: 600
       lr_min: 0.0
       weight_decay: 0.0
-      low_rank_dimension: 4
+      low_rank_dimension: 64
       intervention_positions: "all"
       binarize_dataset: false
       train_on_negative: false
@@ -51,23 +51,24 @@ train:
         - "model.layers.13.mlp.down_proj.weight"
         - "model.layers.14.mlp.down_proj.weight"
         - "model.layers.15.mlp.down_proj.weight"
-
 inference:
   use_bf16: true
   models: ["HyperSteerWeight"]
   model_name: "google/gemma-2-2b-it"
+  # latent related params
   output_length: 128
   latent_num_of_examples: 36
   latent_batch_size: 16
+  # steering related params
   steering_intervention_type: "weight"
   steering_model_name: "google/gemma-2-2b-it"
-  steering_datasets: ["TrainData"]
+  steering_datasets: ["TrainData"] # AlpacaEval or TrainData
   steering_batch_size: 8
   steering_output_length: 128
   steering_layers: [10]
-  steering_num_of_examples: 10
-  steering_factors: [0.0, 1.0]
-  sample_concepts: 500
+  steering_num_of_examples: 20
+  steering_factors: [0.0, 0.2, 0.5, 0.7, 1.0, 2.0, 3.0]
+  sample_concepts: 50
   master_data_dir: "axbench/data"
   seed: 42
   lm_model: "gpt-4o-mini"
@@ -87,7 +88,5 @@ evaluate:
   num_of_workers: 32
   lm_model: "gpt-4o-mini"
   run_winrate: false
-  sample_concepts: 500
-  sample_examples: 10
   winrate_baseline: "PromptSteering"
   master_data_dir: "axbench/data"

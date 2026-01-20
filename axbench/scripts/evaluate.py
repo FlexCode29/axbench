@@ -57,7 +57,15 @@ def harmonic_mean(scores):
         return 0
     return len(scores) / sum(1/s for s in scores)
 
-def data_generator(data_dir, mode, winrate_split_ratio=None, sample_concepts=None, sample_examples=None, sample_seed=None):
+def data_generator(
+    data_dir,
+    mode,
+    winrate_split_ratio=None,
+    sample_concepts=None,
+    sample_examples=None,
+    sample_seed=None,
+    dataset_name=None,
+):
     """
     Generator function to read data files and yield data subsets by group_id.
     Pre-loads data in chunks to reduce I/O bottlenecks.
@@ -77,6 +85,9 @@ def data_generator(data_dir, mode, winrate_split_ratio=None, sample_concepts=Non
         df = pd.read_parquet(os.path.join(data_dir, f'steering_data.parquet'))
     elif mode == "train_data":
         df = pd.read_parquet(os.path.join(data_dir, f'dpo_train_data.parquet'))
+    if dataset_name is not None and "dataset_name" in df.columns:
+        df = df[df["dataset_name"] == dataset_name]
+
     # Optionally sample concept_ids for evaluation
     if sample_concepts is not None and int(sample_concepts) > 0:
         rng = np.random.RandomState(sample_seed if sample_seed is not None else 0)
@@ -423,7 +434,7 @@ def eval_steering_single_task(args_tuple):
         asyncio.run(cleanup())
 
 
-def eval_steering(args):
+def eval_steering(args, dataset_name=None):
     """
     Evaluate steering performance using multi-processing for all tasks
     """
@@ -432,11 +443,14 @@ def eval_steering(args):
 
     # Initialize data generator
     df_generator = data_generator(
-        args.data_dir, mode=args.mode, 
+        args.data_dir,
+        mode=args.mode,
         winrate_split_ratio=args.winrate_split_ratio,
         sample_concepts=args.sample_concepts,
         sample_examples=args.sample_examples,
-        sample_seed=args.sample_seed)
+        sample_seed=args.sample_seed,
+        dataset_name=dataset_name,
+    )
 
     # Load previous state if exists
     state = load_state(args.dump_dir, mode=args.mode)
@@ -490,11 +504,14 @@ def eval_steering(args):
         print("here")
 
         df_generator = data_generator(
-            args.data_dir, mode=args.mode, 
+            args.data_dir,
+            mode=args.mode,
             winrate_split_ratio=args.winrate_split_ratio,
             sample_concepts=args.sample_concepts,
             sample_examples=args.sample_examples,
-            sample_seed=args.sample_seed)
+            sample_seed=args.sample_seed,
+            dataset_name=dataset_name,
+        )
 
         all_tasks_rule_special = [
             (concept_id, current_df, evaluator_name, model_name, args.dump_dir, \
@@ -723,6 +740,7 @@ def main():
         },
     ]
     args = EvalArgs(custom_args=custom_args, section="evaluate", ignore_unknown=True)
+    root_dump_dir = Path(args.dump_dir)
     if args.mode == "train_data":
         args.data_dir = f"{args.dump_dir}/generate" if args.overwrite_inference_dump_dir is None else Path(args.overwrite_inference_dump_dir)
     else:
@@ -730,15 +748,32 @@ def main():
     logger.warning("Evaluating generations with the following configuration:")
     logger.warning(args)
 
-    dump_dir = Path(args.dump_dir) / "evaluate" if args.overwrite_evaluate_dump_dir is None else Path(args.overwrite_evaluate_dump_dir)
+    base_dump_dir = Path(args.dump_dir) / "evaluate" if args.overwrite_evaluate_dump_dir is None else Path(args.overwrite_evaluate_dump_dir)
 
-    dump_dir.mkdir(parents=True, exist_ok=True)
-    args.dump_dir = dump_dir
+    base_dump_dir.mkdir(parents=True, exist_ok=True)
+    args.dump_dir = base_dump_dir
 
     if args.mode == "latent":
         eval_latent(args)
-    elif "steering" in args.mode: # steering or steering_test
-        eval_steering(args)
+    elif "steering" in args.mode:  # steering or steering_test
+        base_inference_dir = (
+            Path(args.overwrite_inference_dump_dir)
+            if args.overwrite_inference_dump_dir is not None
+            else root_dump_dir / "inference"
+        )
+        dataset_runs = [
+            ("TrainData", "training_data"),
+            ("AlpacaEval", "test_data"),
+        ]
+        for dataset_name, subdir in dataset_runs:
+            dataset_args = copy.deepcopy(args)
+            dataset_args.dump_dir = base_dump_dir / subdir
+            dataset_args.data_dir = base_inference_dir / subdir
+            dataset_args.dump_dir.mkdir(parents=True, exist_ok=True)
+            logger.warning(
+                f"Evaluating steering for dataset '{dataset_name}' into {dataset_args.dump_dir}"
+            )
+            eval_steering(dataset_args, dataset_name=dataset_name)
     elif args.mode == "train_data":
         eval_steering(args)
     elif args.mode == "all":

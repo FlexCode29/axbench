@@ -2,7 +2,7 @@
 #
 # example launch command:
 #     torchrun --nproc_per_node=NUM_GPUS axbench/scripts/inference.py --config axbench/demo/sweep/inference.yaml --mode latent
-import os, argparse, yaml, json, glob, pickle, time, itertools, datetime
+import os, argparse, yaml, json, glob, pickle, time, itertools, datetime, copy
 import shutil
 import pandas as pd
 import numpy as np
@@ -232,7 +232,10 @@ def infer_steering(args, rank, world_size, device, logger, training_args, genera
     steering_factors = args.steering_factors
     steering_datasets = args.steering_datasets
 
-    state = load_state(args.dump_dir, "steering", rank)
+    if args.overwrite_inference_dump_dir is not None:
+        state = load_state(overwrite_inference_dump_dir, "steering", rank, subfolder="")
+    else:
+        state = load_state(args.dump_dir, "steering", rank)
     last_concept_id_processed = state.get("last_concept_id", None) if state else None
     logger.warning(f"Rank {rank} last concept_id processed: {last_concept_id_processed}")
 
@@ -500,7 +503,8 @@ def infer_steering(args, rank, world_size, device, logger, training_args, genera
     if rank == 0:
         logger.warning("Rank 0 is merging results.")
         # Merge per-rank results
-        all_parquet_files = list((Path(dump_dir) / "inference").glob("rank_*_steering_data.parquet"))
+        merge_dir = overwrite_inference_dump_dir if args.overwrite_inference_dump_dir is not None else (Path(dump_dir) / "inference")
+        all_parquet_files = list(merge_dir.glob("rank_*_steering_data.parquet"))
         # Parse filenames to extract rank
         import re
         pattern = re.compile(r'rank_(\d+)_steering_data\.parquet')
@@ -530,8 +534,8 @@ def infer_steering(args, rank, world_size, device, logger, training_args, genera
             combined_df = pd.concat(dfs, ignore_index=True)
             # Optionally sort combined_df by 'concept_id' if needed
             combined_df = combined_df.sort_values(by=['concept_id', 'input_id', 'factor']).reset_index(drop=True)
-            combined_df.to_parquet(Path(dump_dir) / "inference" / "steering_data.parquet", engine='pyarrow')
-            logger.warning(f"Saved combined steering inference results to {Path(dump_dir) / 'inference' / 'steering_data.parquet'}")
+            combined_df.to_parquet(merge_dir / "steering_data.parquet", engine='pyarrow')
+            logger.warning(f"Saved combined steering inference results to {merge_dir / 'steering_data.parquet'}")
         else:
             logger.warning("No results to merge.")
 
@@ -1144,10 +1148,62 @@ def main():
     elif inference_args.mode == "latent_on_train_data":
         infer_latent_on_train_data(inference_args, rank, world_size, device, logger, training_args, generate_args)
     elif inference_args.mode == "steering":
-        infer_steering(inference_args, rank, world_size, device, logger, training_args, generate_args, suppress_eval_dir=suppress_eval_dir)
+        base_inference_dir = (
+            Path(inference_args.overwrite_inference_dump_dir)
+            if inference_args.overwrite_inference_dump_dir is not None
+            else Path(inference_args.dump_dir) / "inference"
+        )
+        dataset_runs = [
+            ("TrainData", "training_data"),
+            ("AlpacaEval", "test_data"),
+        ]
+        for dataset_name, subdir in dataset_runs:
+            run_args = copy.deepcopy(inference_args)
+            run_args.steering_datasets = [dataset_name]
+            run_args.overwrite_inference_dump_dir = base_inference_dir / subdir
+            run_args.overwrite_inference_dump_dir.mkdir(parents=True, exist_ok=True)
+            logger.warning(
+                f"Inferencing steering for dataset '{dataset_name}' into {run_args.overwrite_inference_dump_dir}"
+            )
+            infer_steering(
+                run_args,
+                rank,
+                world_size,
+                device,
+                logger,
+                training_args,
+                generate_args,
+                suppress_eval_dir=suppress_eval_dir,
+            )
     elif inference_args.mode == "all":
         infer_latent(inference_args, rank, world_size, device, logger, training_args, generate_args)
-        infer_steering(inference_args, rank, world_size, device, logger, training_args, generate_args, suppress_eval_dir=suppress_eval_dir)
+        base_inference_dir = (
+            Path(inference_args.overwrite_inference_dump_dir)
+            if inference_args.overwrite_inference_dump_dir is not None
+            else Path(inference_args.dump_dir) / "inference"
+        )
+        dataset_runs = [
+            ("TrainData", "training_data"),
+            ("AlpacaEval", "test_data"),
+        ]
+        for dataset_name, subdir in dataset_runs:
+            run_args = copy.deepcopy(inference_args)
+            run_args.steering_datasets = [dataset_name]
+            run_args.overwrite_inference_dump_dir = base_inference_dir / subdir
+            run_args.overwrite_inference_dump_dir.mkdir(parents=True, exist_ok=True)
+            logger.warning(
+                f"Inferencing steering for dataset '{dataset_name}' into {run_args.overwrite_inference_dump_dir}"
+            )
+            infer_steering(
+                run_args,
+                rank,
+                world_size,
+                device,
+                logger,
+                training_args,
+                generate_args,
+                suppress_eval_dir=suppress_eval_dir,
+            )
 
     # Finalize the process group
     dist.destroy_process_group()
