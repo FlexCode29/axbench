@@ -66,9 +66,9 @@ inference:
   steering_batch_size: 8
   steering_output_length: 128
   steering_layers: [10]
-  steering_num_of_examples: 20
+  steering_num_of_examples: 10
   steering_factors: [0.0, 0.2, 0.5, 0.7, 1.0, 2.0, 3.0]
-  sample_concepts: 50
+  sample_concepts: 30
   master_data_dir: "axbench/data"
   seed: 42
   lm_model: "gpt-4o-mini"

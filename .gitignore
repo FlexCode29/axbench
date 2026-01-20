@@ -30,6 +30,9 @@ axbench/500_fast_no_leak
 axbench/500_fast_no_leak_extended
 axbench/500_fast_prompt_only
 axbench/ST310_results_good
+axbench/demo/ablations/dumps
+axbench/ST_310_500_layers_2
+
 
 axbench/scripts/train_fsdp.py
 axbench/sweep/wuzhengx/9b/l20/sft.yaml

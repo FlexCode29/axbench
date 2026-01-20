@@ -7,7 +7,7 @@ if ! command -v rocm-smi &> /dev/null && ! command -v nvidia-smi &> /dev/null; t
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../.." && pwd)"
+repo_root="$(cd "$script_dir/../../.." && pwd)"
 if [[ -f "$repo_root/.env" ]]; then
     set -a
     . "$repo_root/.env"
@@ -23,14 +23,15 @@ gpu_count="${GPU_COUNT:-8}"
 config_root="axbench/demo/ablations/ablations"
 dump_root="axbench/demo/ablations/dumps"
 
+# "baseline_concept500|$config_root/baseline_concept500.yaml|axbench/demo_weight"
+
 runs=(
-  "baseline_concept500|$config_root/baseline_concept500.yaml|axbench/demo_weight"
-  "ablate_rank_r1|$config_root/ablate_rank_r1.yaml|axbench/demo_weight"
+  "ablate_gemma_9b_l20|$config_root/ablate_gemma_9b_l20.yaml|axbench/demo_weight"
+  "ablate_rank_r4|$config_root/ablate_rank_r4.yaml|axbench/demo_weight"
   "ablate_epochs_3|$config_root/ablate_epochs_3.yaml|axbench/demo_weight"
   "ablate_layer_l20|$config_root/ablate_layer_l20.yaml|axbench/demo_weight"
   "ablate_num_layers_2|$config_root/ablate_num_layers_2.yaml|axbench/demo_weight"
   "ablate_hnet_depth_4|$config_root/ablate_hnet_depth_4.yaml|axbench/demo_weight"
-  "ablate_gemma_9b_l20|$config_root/ablate_gemma_9b_l20.yaml|axbench/demo_weight"
 )
 
 for entry in "${runs[@]}"; do

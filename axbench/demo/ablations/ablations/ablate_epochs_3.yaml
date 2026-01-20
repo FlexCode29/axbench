@@ -19,18 +19,18 @@ train:
   use_wandb: true
   wandb_project: "hypersteer"
   wandb_name: "marcomolinari4"
-  run_name: "ablate_rank_r1"
+  run_name: "ablate_epochs_3"
   output_length: 128
   models:
     HyperSteerWeight:
       batch_size: 16
       gradient_accumulation_steps: 1
-      n_epochs: 10
+      n_epochs: 3
       lr: 0.001
       lr_decay_start_step: 600
       lr_min: 0.0
       weight_decay: 0.0
-      low_rank_dimension: 4
+      low_rank_dimension: 64
       intervention_positions: "all"
       binarize_dataset: false
       train_on_negative: false
@@ -66,9 +66,9 @@ inference:
   steering_batch_size: 8
   steering_output_length: 128
   steering_layers: [10]
-  steering_num_of_examples: 20
+  steering_num_of_examples: 10
   steering_factors: [0.0, 0.2, 0.5, 0.7, 1.0, 2.0, 3.0]
-  sample_concepts: 50
+  sample_concepts: 30
   master_data_dir: "axbench/data"
   seed: 42
   lm_model: "gpt-4o-mini"

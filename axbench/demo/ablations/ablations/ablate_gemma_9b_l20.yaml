@@ -23,7 +23,7 @@ train:
   output_length: 128
   models:
     HyperSteerWeight:
-      batch_size: 16
+      batch_size: 2
       gradient_accumulation_steps: 1
       n_epochs: 10
       lr: 0.001
@@ -35,7 +35,7 @@ train:
       binarize_dataset: false
       train_on_negative: false
       exclude_bos: true
-      hypernet_name_or_path: "google/gemma-2-2b-it"
+      hypernet_name_or_path: "google/gemma-2-9b-it"
       num_hidden_layers: 8
       hypernet_initialize_from_pretrained: false
       weight_target_modules:
@@ -54,21 +54,21 @@ train:
 inference:
   use_bf16: true
   models: ["HyperSteerWeight"]
-  model_name: "google/gemma-2-2b-it"
+  model_name: "google/gemma-2-9b-it"
   # latent related params
   output_length: 128
   latent_num_of_examples: 36
   latent_batch_size: 16
   # steering related params
   steering_intervention_type: "weight"
-  steering_model_name: "google/gemma-2-2b-it"
+  steering_model_name: "google/gemma-2-9b-it"
   steering_datasets: ["TrainData"] # AlpacaEval or TrainData
   steering_batch_size: 8
   steering_output_length: 128
-  steering_layers: [10]
-  steering_num_of_examples: 20
+  steering_layers: [20]
+  steering_num_of_examples: 10
   steering_factors: [0.0, 0.2, 0.5, 0.7, 1.0, 2.0, 3.0]
-  sample_concepts: 50
+  sample_concepts: 30
   master_data_dir: "axbench/data"
   seed: 42
   lm_model: "gpt-4o-mini"
