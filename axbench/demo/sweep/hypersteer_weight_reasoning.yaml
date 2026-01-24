@@ -11,6 +11,7 @@ train:
     HyperSteerWeight:
       batch_size: 16
       gradient_accumulation_steps: 1
+      max_training_examples: 1000
       n_epochs: 10
       lr: 0.001
       lr_decay_start_step: 600
