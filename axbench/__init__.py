@@ -45,5 +45,12 @@ from .scripts.args.eval_args import *
 from .scripts.args.training_args import *
 from .scripts.args.dataset_args import *
 
-from .scripts.evaluate import *
+import warnings
+try:
+    from .scripts.evaluate import *  # noqa: F401,F403
+except ModuleNotFoundError as e:
+    warnings.warn(
+        f"Optional dependency missing for axbench.scripts.evaluate ({e}). "
+        "Evaluation utilities will be unavailable unless extra deps are installed."
+    )
 from .scripts.inference import *
