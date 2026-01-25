@@ -165,6 +165,7 @@ def _ensure_axbench_files_from_hf_snapshot(data_dir: str) -> None:
                 name = str(sub.iloc[0][concept_name_col]) if concept_name_col else str(cid)
                 genre = str(sub.iloc[0][genre_col]) if genre_col else "unknown"
                 entries.append({
+                    "concept_id": int(cid),
                     "concept": name,
                     "concept_genres_map": {name: [genre]},
                 })
@@ -326,6 +327,16 @@ def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, met
     model_name = "HyperSteerWeight" if "HyperSteerWeight" in args.models.keys() else "HyperSteer"
 
     metadata_path = os.path.join(args.data_dir, 'metadata.jsonl')
+
+    # Defensive check: HyperSteerWeight requires concept_id in metadata
+    if rank == 0:
+        with open(metadata_path, "r") as f:
+            first = json.loads(next(iter(f)))
+        if "concept_id" not in first:
+            raise RuntimeError(
+                "metadata.jsonl is missing `concept_id`. "
+                "Delete the HF-converted metadata.jsonl and rerun so it can be regenerated."
+            )
     is_chat_model = True if args.model_name in CHAT_MODELS else False
 
     benchmark_model = getattr(axbench, model_name)(
