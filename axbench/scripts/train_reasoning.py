@@ -370,15 +370,23 @@ def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, met
 
     full_df = all_df.copy()
 
-    full_df = prepare_df_combined(
-        full_df, negative_df, tokenizer,
-        binarize=args.models[model_name].binarize_dataset,
-        train_on_negative=args.models[model_name].train_on_negative,
-        is_chat_model=is_chat_model,
-        output_length=generate_args.output_length,
-        model_name=args.model_name,
-        max_num_of_examples=args.max_num_of_examples,
-    )
+    # HF reasoning datasets may not include a `category` column.
+    # prepare_df_combined assumes AxBench-style positives/negatives.
+    if "category" not in full_df.columns:
+        logger.warning(
+            "[HyperSteer] No `category` column found in dataset. "
+            "Skipping prepare_df_combined and using instruction-only data."
+        )
+    else:
+        full_df = prepare_df_combined(
+            full_df, negative_df, tokenizer,
+            binarize=args.models[model_name].binarize_dataset,
+            train_on_negative=args.models[model_name].train_on_negative,
+            is_chat_model=is_chat_model,
+            output_length=generate_args.output_length,
+            model_name=args.model_name,
+            max_num_of_examples=args.max_num_of_examples,
+        )
     # Removed: max_training_examples truncation here. It is now handled only inside HyperSteer.make_dataloader.
 
     # Read raw YAML config (TrainingArgs drops unknown fields)
