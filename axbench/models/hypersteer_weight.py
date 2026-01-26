@@ -538,7 +538,11 @@ class HyperSteerWeight(Model):
                         with torch.no_grad():
                             true_ppl_val = torch.exp(raw_loss).item()
                     else:
-                        raw_loss = torch.tensor(0.0).to(self.device)
+                        # raw_loss = torch.tensor(0.0).to(self.device)
+                        # true_ppl_val = 0.0
+                        
+                        # Keep graph alive even when batch has no valid tokens
+                        raw_loss = ce_loss.sum() * 0.0
                         true_ppl_val = 0.0
                     
                     loss = raw_loss / self.training_args.gradient_accumulation_steps
