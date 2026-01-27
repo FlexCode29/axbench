@@ -1,0 +1,66 @@
+[
+  {
+    "concept_id": 0,
+    "concept": "Basic Arithmetic Reasoning",
+    "rows": 2588,
+    "genres": [
+      "positive"
+    ]
+  },
+  {
+    "concept_id": 1,
+    "concept": "Computer Programming Reasoning",
+    "rows": 169,
+    "genres": [
+      "positive"
+    ]
+  },
+  {
+    "concept_id": 2,
+    "concept": "Epidemiology Reasoning",
+    "rows": 581,
+    "genres": [
+      "positive"
+    ]
+  },
+  {
+    "concept_id": 3,
+    "concept": "Classical Mechanics Reasoning",
+    "rows": 97,
+    "genres": [
+      "positive"
+    ]
+  },
+  {
+    "concept_id": 4,
+    "concept": "Organic Chemistry Reasoning",
+    "rows": 20,
+    "genres": [
+      "positive"
+    ]
+  },
+  {
+    "concept_id": 5,
+    "concept": "Medieval European History Reasoning",
+    "rows": 169,
+    "genres": [
+      "positive"
+    ]
+  },
+  {
+    "concept_id": 6,
+    "concept": "Constitutional Law Reasoning",
+    "rows": 48,
+    "genres": [
+      "positive"
+    ]
+  },
+  {
+    "concept_id": 7,
+    "concept": "Narrative Structure Reasoning",
+    "rows": 48,
+    "genres": [
+      "positive"
+    ]
+  }
+]

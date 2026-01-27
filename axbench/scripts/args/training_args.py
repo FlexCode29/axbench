@@ -35,6 +35,7 @@ class ModelContainer:
 class ModelParams:
     batch_size: Optional[int] = None
     n_epochs: Optional[int] = None
+    save_epochs: Optional[List[int]] = None
     topk: Optional[int] = None
     lr: Optional[float] = None
     dropout: Optional[float] = 0.0
@@ -114,10 +115,10 @@ class TrainingArgs:
             'concept_path', 'model_name', 'layer', 'component',
             'data_dir', 'dump_dir', 'run_name', 'seed', 'use_bf16', 'overwrite_data_dir', 'max_concepts',
             'overwrite_metadata_dir', 'overwrite_inference_data_dir', 'max_num_of_examples', 'use_dpo_loss',
-            'use_wandb', 'wandb_project', 'wandb_name', 'output_length'
+            'use_wandb', 'wandb_project', 'wandb_name', 'output_length', 'resume_from_latest'
         ]
         hierarchical_params = [
-            'batch_size', 'n_epochs', 'topk',
+            'batch_size', 'n_epochs', 'save_epochs', 'topk',
             'lr', 'coeff_l1_loss_null', 'coeff_l1_loss', 'coeff_l2_loss', 'coeff_norm_loss', 
             'low_rank_dimension', 'dataset_category', 'intervention_positions', 'intervention_layers',
             'exclude_bos', 'binarize_dataset', 'intervention_type', 'gradient_accumulation_steps',
@@ -258,7 +259,8 @@ class TrainingArgs:
     @staticmethod
     def _infer_type(param_name: str):
         bool_params = ['use_bf16', 'exclude_bos', 'binarize_dataset', 'train_on_negative', 
-                       'use_synergy', 'use_dpo_loss', 'use_wandb', 'reference_free', 'negative_only']
+                       'use_synergy', 'use_dpo_loss', 'use_wandb', 'reference_free', 'negative_only',
+                       'resume_from_latest']
         int_params = ['layer', 'batch_size', 'n_epochs', 'topk', 'seed', 'low_rank_dimension', 
                       'gradient_accumulation_steps', 'lora_alpha', 'max_concepts', 'max_num_of_examples', 'output_length']
         float_params = [
@@ -272,6 +274,7 @@ class TrainingArgs:
             'overwrite_metadata_dir', 'overwrite_inference_data_dir', 'bow_penalty', 'loss_type',
             'wandb_project', 'wandb_name', 'steering_prompt_type']
         list_params = ['intervention_layers', 'reft_layers', 'lora_layers', 'lora_components', 'steering_factors', 'preference_pairs']
+        list_params.append('save_epochs')
 
         if param_name in int_params:
             return int

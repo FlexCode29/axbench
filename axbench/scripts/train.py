@@ -18,6 +18,7 @@ import numpy as np
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from huggingface_hub import hf_hub_download
 from pathlib import Path
+import re
 from args.training_args import TrainingArgs
 from args.dataset_args import DatasetArgs
 from axbench.utils.constants import * 
@@ -219,6 +220,31 @@ def partition_list(lst, n):
     return [lst[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n)]
 
 
+def _truthy(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "t"}
+
+
+def find_latest_lora_checkpoint(dump_dir, concept_id, max_epoch=None):
+    lora_dir = Path(dump_dir) / "lora" / str(concept_id)
+    if not lora_dir.exists():
+        return None, 0
+    best_epoch = 0
+    best_path = None
+    for entry in lora_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        match = re.match(r"epoch_(\d+)", entry.name)
+        if not match:
+            continue
+        epoch = int(match.group(1))
+        if max_epoch is not None and epoch > max_epoch:
+            continue
+        if epoch > best_epoch:
+            best_epoch = epoch
+            best_path = entry
+    return best_path, best_epoch
+
+
 def load_state(dump_dir, rank):
     """
     Load the state from a file if it exists.
@@ -310,20 +336,32 @@ def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, met
 def main():
    
     args = TrainingArgs(section="train")
-    generate_args = DatasetArgs(section="generate")
+    generate_args = DatasetArgs(section="generate", ignore_unknown=True)
 
-    # Initialize the process group
-    dist.init_process_group(backend='nccl', init_method='env://', 
-                          timeout=datetime.timedelta(seconds=6000))
-
-    # Get the rank and world_size from environment variables
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
-    local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    use_dist = os.environ.get("RANK") is not None and os.environ.get("WORLD_SIZE") is not None
+    if use_dist:
+        # Initialize the process group
+        dist.init_process_group(
+            backend='nccl',
+            init_method='env://',
+            timeout=datetime.timedelta(seconds=6000)
+        )
+        # Get the rank and world_size from environment variables
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    else:
+        rank = 0
+        world_size = 1
+        local_rank = 0
+        logger.warning("Distributed environment not detected; running in single-process mode.")
 
     # Set the device for this process
-    device = torch.device(f'cuda:{local_rank}')
-    torch.cuda.set_device(device)
+    if torch.cuda.is_available():
+        device = torch.device(f'cuda:{local_rank}')
+        torch.cuda.set_device(device)
+    else:
+        device = torch.device('cpu')
 
     # Set a unique seed per rank for reproducibility
     set_seed(args.seed + rank)
@@ -446,21 +484,38 @@ def main():
             )
             low_rank_dimension = args.models[model_name].low_rank_dimension \
                 if args.models[model_name].low_rank_dimension else 1
-            benchmark_model.make_model(
-                mode="train",
-                embed_dim=model_instance.config.hidden_size,
-                low_rank_dimension=low_rank_dimension,
-                dtype=torch.bfloat16 if args.use_bf16 else None,
-                intervention_type=args.models[model_name].intervention_type,
-                concept_id=concept_id,
-                sae_params=sae_params,
-                metadata_path=metadata_path,
-                dump_dir=dump_dir,
-                model_params=args.models[model_name],
-                dropout=args.models[model_name].dropout,
-                intervention_positions_dropout=args.models[model_name].intervention_positions_dropout,
-                preference_pairs=args.models[model_name].preference_pairs,
-            )
+            start_epoch = 0
+            resume_from = None
+            if model_name == "LoRA" and _truthy(getattr(args, "resume_from_latest", False)):
+                resume_from, resume_epoch = find_latest_lora_checkpoint(
+                    dump_dir, concept_id, max_epoch=args.models[model_name].n_epochs
+                )
+                if resume_from is not None and resume_epoch > 0:
+                    logger.warning(f"Resuming LoRA from {resume_from} (epoch {resume_epoch})")
+                    benchmark_model.load(
+                        checkpoint_dir=resume_from,
+                        concept_id=concept_id,
+                        concept_name=concept,
+                        is_trainable=True,
+                    )
+                    start_epoch = resume_epoch
+            if not (model_name == "LoRA" and resume_from is not None and start_epoch > 0):
+                benchmark_model.make_model(
+                    mode="train",
+                    embed_dim=model_instance.config.hidden_size,
+                    low_rank_dimension=low_rank_dimension,
+                    dtype=torch.bfloat16 if args.use_bf16 else None,
+                    intervention_type=args.models[model_name].intervention_type,
+                    concept_id=concept_id,
+                    concept_name=concept,
+                    sae_params=sae_params,
+                    metadata_path=metadata_path,
+                    dump_dir=dump_dir,
+                    model_params=args.models[model_name],
+                    dropout=args.models[model_name].dropout,
+                    intervention_positions_dropout=args.models[model_name].intervention_positions_dropout,
+                    preference_pairs=args.models[model_name].preference_pairs,
+                )
             if model_name not in {"LoReFT", "LoRA", "SFT", "BoW", "PreferenceLoReFT", "ConceptLoReFT"} and args.use_bf16:
                 if isinstance(benchmark_model.ax, list):
                     for ax in benchmark_model.ax:
@@ -473,6 +528,8 @@ def main():
                 "exclude_bos": args.models[model_name].exclude_bos,
                 "metadata_path": metadata_path,
                 "use_dpo_loss": args.use_dpo_loss,
+                "dump_dir": dump_dir,
+                "concept_name": concept,
                 "logging_metadata": {
                     "concept_id": concept_id,
                     "model_name": model_name,
@@ -498,8 +555,10 @@ def main():
                 steering_prompt_type=args.models[model_name].steering_prompt_type,
                 keep_orig_axbench_format=generate_args.keep_orig_axbench_format,
             )
+            kwargs["start_epoch"] = start_epoch
+            kwargs["resume_from"] = resume_from
             benchmark_model.train(prepared_df, **kwargs)
-            benchmark_model.save(dump_dir, model_name=f"rank_{rank}_{model_name}")
+            benchmark_model.save(dump_dir, model_name=f"rank_{rank}_{model_name}", concept_name=concept)
             if model_name == "SFT":
                 # we need to reload the original model after SFT.
                 if args.use_bf16:
@@ -520,13 +579,15 @@ def main():
         save_state(dump_dir, current_state, metadata[concept_id], rank)
 
     # Synchronize all processes
-    dist.barrier()
+    if use_dist:
+        dist.barrier()
     
     if "HyperSteer" in args.models.keys():
         train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, metadata, dump_dir, rank, device, local_rank, world_size)
     
     # Synchronize all processes 
-    dist.barrier()
+    if use_dist:
+        dist.barrier()
 
     # Rank 0 merges results
     if rank == 0:
@@ -662,4 +723,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

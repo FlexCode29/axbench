@@ -1,0 +1,5 @@
+{"epoch": 1, "step": 1, "avg_loss": 1.325263261795044, "tag": "step_1", "concept_id": 0, "concept_name": "Basic Arithmetic Reasoning"}
+{"epoch": 5, "avg_loss": 0.671577007085131, "tag": "epoch_5", "concept_id": 0, "concept_name": "Basic Arithmetic Reasoning"}
+{"epoch": 11, "avg_loss": 0.624420262700439, "tag": "epoch_11", "concept_id": 0, "concept_name": "Basic Arithmetic Reasoning"}
+{"epoch": 1, "step": 1, "avg_loss": 1.325263261795044, "tag": "step_1", "concept_id": 0, "concept_name": "Basic Arithmetic Reasoning"}
+{"epoch": 16, "avg_loss": 0.5828632212588002, "tag": "epoch_16", "concept_id": 0, "concept_name": "Basic Arithmetic Reasoning"}

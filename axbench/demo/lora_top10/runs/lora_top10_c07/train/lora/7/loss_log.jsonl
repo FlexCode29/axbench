@@ -1,0 +1,4 @@
+{"epoch": 1, "step": 1, "avg_loss": 1.4326494932174683, "tag": "step_1", "concept_id": 7, "concept_name": "Narrative Structure Reasoning"}
+{"epoch": 5, "avg_loss": 0.7840795467297236, "tag": "epoch_5", "concept_id": 7, "concept_name": "Narrative Structure Reasoning"}
+{"epoch": 11, "avg_loss": 0.4267347678542137, "tag": "epoch_11", "concept_id": 7, "concept_name": "Narrative Structure Reasoning"}
+{"epoch": 16, "avg_loss": 0.2811051607131958, "tag": "epoch_16", "concept_id": 7, "concept_name": "Narrative Structure Reasoning"}

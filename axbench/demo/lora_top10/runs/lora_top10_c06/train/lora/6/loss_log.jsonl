@@ -1,0 +1,4 @@
+{"epoch": 1, "step": 1, "avg_loss": 1.4746081829071045, "tag": "step_1", "concept_id": 6, "concept_name": "Constitutional Law Reasoning"}
+{"epoch": 5, "avg_loss": 0.7165078024069468, "tag": "epoch_5", "concept_id": 6, "concept_name": "Constitutional Law Reasoning"}
+{"epoch": 11, "avg_loss": 0.359788512190183, "tag": "epoch_11", "concept_id": 6, "concept_name": "Constitutional Law Reasoning"}
+{"epoch": 16, "avg_loss": 0.22009190420309702, "tag": "epoch_16", "concept_id": 6, "concept_name": "Constitutional Law Reasoning"}

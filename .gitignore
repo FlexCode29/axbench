@@ -39,6 +39,13 @@ axbench/data/seed_instructions/
 axbench/models/dbm.py
 axbench/concept1
 axbench/concept3
+axbench/archive_of_runs
+axbench/ST_310_500_layers_2
+axbench/demo_weight
+axbench/archive_of_runs
+axbench/demo/ablations
+axbench/500_first_icml
+axbench/old_demoes
 
 axbench/examples/upload.ipynb
 tmp.ipynb

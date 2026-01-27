@@ -1,0 +1,26 @@
+train:
+  model_name: "google/gemma-2-2b-it"
+  layer: 10
+  component: "res"
+  seed: 42
+  use_bf16: true
+  use_wandb: true
+  wandb_project: "axbench-lora"
+  dump_dir: "axbench/demo/lora_top10/runs"
+  output_length: 128
+  use_dpo_loss: false
+  models:
+    LoRA:
+      batch_size: 4
+      gradient_accumulation_steps: 1
+      n_epochs: 16
+      save_epochs: [5, 11, 16]
+      lr: 0.0009
+      weight_decay: 0.0
+      low_rank_dimension: 4
+      lora_layers: [10]
+      lora_components: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+      lora_alpha: 32
+      binarize_dataset: false
+      train_on_negative: false
+      exclude_bos: true

@@ -1,0 +1,4 @@
+{"epoch": 1, "step": 1, "avg_loss": 1.4755719900131226, "tag": "step_1", "concept_id": 5, "concept_name": "Medieval European History Reasoning"}
+{"epoch": 5, "avg_loss": 0.9312294111695401, "tag": "epoch_5", "concept_id": 5, "concept_name": "Medieval European History Reasoning"}
+{"epoch": 11, "avg_loss": 0.6873703806899315, "tag": "epoch_11", "concept_id": 5, "concept_name": "Medieval European History Reasoning"}
+{"epoch": 16, "avg_loss": 0.5587015373762264, "tag": "epoch_16", "concept_id": 5, "concept_name": "Medieval European History Reasoning"}

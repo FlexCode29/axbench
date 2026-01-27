@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from .model import Model
 import peft
 from peft import PeftModel, LoraConfig, get_peft_model
@@ -22,6 +23,14 @@ from transformers import set_seed
 class LoRA(Model):
     def __str__(self):
         return 'LoRA'
+
+    @staticmethod
+    def _slugify(text, max_len=64):
+        if not text:
+            return ""
+        slug = "".join(ch.lower() if ch.isalnum() else "_" for ch in str(text))
+        slug = "_".join([s for s in slug.split("_") if s])
+        return slug[:max_len]
     
     def make_model(self, **kwargs):
         peft_config = LoraConfig(
@@ -38,37 +47,110 @@ class LoRA(Model):
         self.ax_model = ax_model
         # lora is concept-ful due to its nature.
         self.concept_id = kwargs.get("concept_id")
+        self.concept_name = kwargs.get("concept_name")
 
     def save(self, dump_dir, **kwargs):
         # folder-based saving
-        dump_dir = Path(f"{dump_dir}/lora/{self.concept_id}")
+        tag = kwargs.get("tag")
+        concept_name = kwargs.get("concept_name", getattr(self, "concept_name", None))
+        concept_slug = self._slugify(concept_name)
+        dump_dir = Path(dump_dir) / "lora" / str(self.concept_id)
+        if tag:
+            tag_name = f"{tag}__{concept_slug}" if concept_slug else str(tag)
+            dump_dir = dump_dir / tag_name
         dump_dir.mkdir(parents=True, exist_ok=True)
         self.ax_model.save_pretrained(dump_dir)
+        if concept_name and not tag:
+            concept_file = dump_dir / "concept_name.txt"
+            concept_file.write_text(str(concept_name), encoding="utf-8")
 
-    def load(self, dump_dir, **kwargs):
+    def load(self, dump_dir=None, **kwargs):
         # folder-based loading
-        self.concept_id = kwargs.get("concept_id")
-        dump_dir = Path(f"{dump_dir}/lora/{self.concept_id}")
+        self.concept_id = kwargs.get("concept_id", getattr(self, "concept_id", None))
+        self.concept_name = kwargs.get("concept_name", getattr(self, "concept_name", None))
+        checkpoint_dir = kwargs.get("checkpoint_dir", None)
+        is_trainable = kwargs.get("is_trainable", False)
+        if checkpoint_dir is None:
+            if self.concept_id is None:
+                raise ValueError("concept_id is required to load LoRA checkpoint when checkpoint_dir is not provided.")
+            dump_dir = Path(f"{dump_dir}/lora/{self.concept_id}")
+        else:
+            dump_dir = Path(checkpoint_dir)
         self.ax_model = PeftModel.from_pretrained(
-            self.model, dump_dir)
+            self.model, dump_dir, is_trainable=is_trainable)
 
     def train(self, examples, **kwargs):
         train_dataloader = self.make_dataloader(examples, **kwargs)
         torch.cuda.empty_cache()
+        if "concept_name" in kwargs and kwargs["concept_name"]:
+            self.concept_name = kwargs["concept_name"]
+        use_wandb = getattr(self, "use_wandb", False)
+        wandb_run = None
+        if use_wandb:
+            import wandb
+            run_name = f"{self.concept_id}_{self.concept_name}" if self.concept_name else f"{self.concept_id}"
+            if wandb.run is None:
+                wandb_run = wandb.init(
+                    project=kwargs.get("wandb_project", None),
+                    entity=kwargs.get("wandb_name", None),
+                    name=run_name,
+                    dir="wandb",
+                )
+                wandb_run.config.update(
+                    {
+                        "concept_id": self.concept_id,
+                        "concept_name": self.concept_name,
+                        "model_name": kwargs.get("logging_metadata", {}).get("model_name", "LoRA"),
+                        "layer": kwargs.get("logging_metadata", {}).get("layer", None),
+                    },
+                    allow_val_change=True,
+                )
+            else:
+                wandb_run = wandb.run
+        save_epochs = kwargs.get("save_epochs", None)
+        if save_epochs is None:
+            save_epochs = getattr(self.training_args, "save_epochs", None)
+        if isinstance(save_epochs, int):
+            save_epochs = {save_epochs}
+        elif isinstance(save_epochs, (list, tuple, set)):
+            save_epochs = {int(e) for e in save_epochs}
+        else:
+            save_epochs = set()
 
         # Optimizer and lr
         optimizer = torch.optim.AdamW(
             self.ax_model.parameters(), 
             lr=self.training_args.lr, weight_decay=self.training_args.weight_decay)
-        num_training_steps = self.training_args.n_epochs * max(1, len(train_dataloader) // self.training_args.gradient_accumulation_steps)
+        steps_per_epoch = max(1, len(train_dataloader) // self.training_args.gradient_accumulation_steps)
+        num_training_steps = self.training_args.n_epochs * steps_per_epoch
+        start_epoch = int(kwargs.get("start_epoch", 0))
+        resume_steps = start_epoch * steps_per_epoch
         lr_scheduler = get_scheduler(
-            "linear", optimizer=optimizer,
-            num_warmup_steps=0, num_training_steps=num_training_steps)
+            "linear",
+            optimizer=optimizer,
+            num_warmup_steps=0,
+            num_training_steps=num_training_steps,
+        )
+        if resume_steps > 0:
+            for _ in range(resume_steps):
+                lr_scheduler.step()
         # Main training loop.
-        rank = torch.distributed.get_rank()
-        progress_bar, curr_step = tqdm(range(num_training_steps), position=rank, leave=True), 0
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+        else:
+            rank = 0
+        progress_bar = tqdm(
+            total=num_training_steps,
+            initial=resume_steps,
+            position=rank,
+            leave=True,
+        )
+        curr_step = resume_steps
         
-        for epoch in range(self.training_args.n_epochs):
+        did_step1_checkpoint = start_epoch > 0 or kwargs.get("resume_from") is not None
+        for epoch in range(start_epoch, self.training_args.n_epochs):
+            epoch_loss_sum = 0.0
+            epoch_loss_count = 0
             for step, batch in enumerate(train_dataloader):
                 # prepare input
                 inputs = {k: v.to(self.device) for k, v in batch.items()}
@@ -86,6 +168,43 @@ class LoRA(Model):
                 loss /= self.training_args.gradient_accumulation_steps
                 # grads
                 loss.backward()
+                epoch_loss_sum += loss.detach().float().item()
+                epoch_loss_count += 1
+
+                if not did_step1_checkpoint:
+                    save_root = kwargs.get("dump_dir", self.dump_dir)
+                    if save_root is not None:
+                        avg_loss = epoch_loss_sum / max(1, epoch_loss_count)
+                        tag = "step_1"
+                        self.save(save_root, tag=tag, concept_name=self.concept_name)
+                        log_entry = {
+                            "epoch": epoch + 1,
+                            "step": step + 1,
+                            "avg_loss": avg_loss,
+                            "tag": tag,
+                            "concept_id": self.concept_id,
+                            "concept_name": self.concept_name,
+                        }
+                        log_path = Path(save_root) / "lora" / str(self.concept_id) / "loss_log.jsonl"
+                        with log_path.open("a", encoding="utf-8") as f:
+                            f.write(json.dumps(log_entry, ensure_ascii=True) + "\n")
+                        ckpt_dir = Path(save_root) / "lora" / str(self.concept_id)
+                        concept_slug = self._slugify(self.concept_name)
+                        ckpt_dir = ckpt_dir / (f"{tag}__{concept_slug}" if concept_slug else tag)
+                        (ckpt_dir / "loss.json").write_text(
+                            json.dumps(log_entry, ensure_ascii=True, indent=2),
+                            encoding="utf-8",
+                        )
+                        if use_wandb:
+                            wandb.log(
+                                {
+                                    "checkpoint/avg_loss": avg_loss,
+                                    "checkpoint/epoch": epoch + 1,
+                                    "checkpoint/step": step + 1,
+                                },
+                                step=1,
+                            )
+                        did_step1_checkpoint = True
 
                 # Perform optimization step every gradient_accumulation_steps
                 if (step + 1) % self.training_args.gradient_accumulation_steps == 0 or (step + 1) == len(train_dataloader):
@@ -98,7 +217,42 @@ class LoRA(Model):
                     progress_bar.update(1)
                     progress_bar.set_description(
                         "lr %.6f || loss %.6f" % (curr_lr, loss))
+            if save_epochs and (epoch + 1) in save_epochs:
+                save_root = kwargs.get("dump_dir", self.dump_dir)
+                if save_root is not None:
+                    avg_loss = epoch_loss_sum / max(1, epoch_loss_count)
+                    tag = f"epoch_{epoch + 1}"
+                    self.save(save_root, tag=tag, concept_name=self.concept_name)
+                    # append loss log
+                    log_entry = {
+                        "epoch": epoch + 1,
+                        "avg_loss": avg_loss,
+                        "tag": tag,
+                        "concept_id": self.concept_id,
+                        "concept_name": self.concept_name,
+                    }
+                    log_path = Path(save_root) / "lora" / str(self.concept_id) / "loss_log.jsonl"
+                    with log_path.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(log_entry, ensure_ascii=True) + "\n")
+                    # write loss alongside checkpoint
+                    ckpt_dir = Path(save_root) / "lora" / str(self.concept_id)
+                    concept_slug = self._slugify(self.concept_name)
+                    ckpt_dir = ckpt_dir / (f"{tag}__{concept_slug}" if concept_slug else tag)
+                    (ckpt_dir / "loss.json").write_text(
+                        json.dumps(log_entry, ensure_ascii=True, indent=2),
+                        encoding="utf-8",
+                    )
+                    if use_wandb:
+                        wandb.log(
+                            {
+                                "checkpoint/avg_loss": avg_loss,
+                                "checkpoint/epoch": epoch + 1,
+                            },
+                            step=epoch + 1,
+                        )
         progress_bar.close()
+        if use_wandb and wandb_run is not None:
+            wandb_run.finish()
 
     @torch.no_grad()
     def predict_steer(self, examples, **kwargs):
@@ -113,7 +267,10 @@ class LoRA(Model):
         all_generations = []
         all_perplexities = []
         # Main training loop.
-        rank = torch.distributed.get_rank()
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+        else:
+            rank = 0
         progress_bar = tqdm(range(0, len(examples), batch_size), position=rank, leave=True)
         for i in range(0, len(examples), batch_size):
             batch_examples = examples.iloc[i:i+batch_size]
