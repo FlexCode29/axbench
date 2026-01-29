@@ -458,6 +458,12 @@ def main():
 
     state = load_state(dump_dir, rank)
     last_concept_id = state.get("last_concept_id", None) if state else None
+    resume_flag = _truthy(getattr(args, "resume_from_latest", False))
+    has_lora = "LoRA" in args.models.keys()
+    logger.warning(f"Rank {rank} resume_from_latest={resume_flag} has_lora={has_lora}")
+    if resume_flag and has_lora:
+        last_concept_id = None
+        logger.warning(f"Rank {rank} ignoring train_state due to resume_from_latest")
     logger.warning(f"Rank {rank} last concept_id processed: {last_concept_id}")
 
     # Run training for assigned concept_ids
@@ -465,9 +471,28 @@ def main():
     
     for concept_id, concept_df in my_df_list:
         concept_id = int(concept_id)
+        # When resuming, ignore train_state and decide based on latest checkpoint.
+        if _truthy(getattr(args, "resume_from_latest", False)) and "LoRA" in args.models.keys():
+            resume_from, resume_epoch = find_latest_lora_checkpoint(
+                dump_dir, concept_id, max_epoch=args.models["LoRA"].n_epochs
+            )
+            if resume_epoch >= args.models["LoRA"].n_epochs:
+                logger.warning(f"Rank {rank} skipping concept_id {concept_id} because it is already processed")
+                continue
         if last_concept_id is not None and concept_id <= last_concept_id:
-            logger.warning(f"Rank {rank} skipping concept_id {concept_id} because it is already processed")
-            continue
+            can_resume = _truthy(getattr(args, "resume_from_latest", False))
+            if not can_resume:
+                logger.warning(f"Rank {rank} skipping concept_id {concept_id} because it is already processed")
+                continue
+            if "LoRA" not in args.models.keys():
+                logger.warning(f"Rank {rank} skipping concept_id {concept_id} because it is already processed")
+                continue
+            resume_from, resume_epoch = find_latest_lora_checkpoint(
+                dump_dir, concept_id, max_epoch=args.models["LoRA"].n_epochs
+            )
+            if resume_epoch >= args.models["LoRA"].n_epochs:
+                logger.warning(f"Rank {rank} skipping concept_id {concept_id} because it is already processed")
+                continue
         logger.warning(f"Training models for concept_id {concept_id} on rank {rank}")
         for model_name in sorted(args.models.keys()):
             
@@ -713,7 +738,8 @@ def main():
                     logger.error(f"Error deleting file {f.name}: {e}")
 
     # Finalize the process group
-    dist.destroy_process_group()
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
 
     # Remove handlers to prevent duplication if the script is run multiple times
     logger.removeHandler(console_handler)

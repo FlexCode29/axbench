@@ -1,4 +1,0 @@
-{"epoch": 1, "step": 1, "avg_loss": 1.0959750413894653, "tag": "step_1", "concept_id": 3, "concept_name": "Classical Mechanics Reasoning"}
-{"epoch": 5, "avg_loss": 0.6394912755489349, "tag": "epoch_5", "concept_id": 3, "concept_name": "Classical Mechanics Reasoning"}
-{"epoch": 11, "avg_loss": 0.39894973039627074, "tag": "epoch_11", "concept_id": 3, "concept_name": "Classical Mechanics Reasoning"}
-{"epoch": 16, "avg_loss": 0.2740021526813507, "tag": "epoch_16", "concept_id": 3, "concept_name": "Classical Mechanics Reasoning"}

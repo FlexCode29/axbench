@@ -1,4 +1,0 @@
-{"epoch": 1, "step": 1, "avg_loss": 1.2154864072799683, "tag": "step_1", "concept_id": 4, "concept_name": "Organic Chemistry Reasoning"}
-{"epoch": 5, "avg_loss": 0.6487745523452759, "tag": "epoch_5", "concept_id": 4, "concept_name": "Organic Chemistry Reasoning"}
-{"epoch": 11, "avg_loss": 0.2535777002573013, "tag": "epoch_11", "concept_id": 4, "concept_name": "Organic Chemistry Reasoning"}
-{"epoch": 16, "avg_loss": 0.14435369223356248, "tag": "epoch_16", "concept_id": 4, "concept_name": "Organic Chemistry Reasoning"}

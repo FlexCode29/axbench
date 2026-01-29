@@ -217,6 +217,16 @@ class LoRA(Model):
                     progress_bar.update(1)
                     progress_bar.set_description(
                         "lr %.6f || loss %.6f" % (curr_lr, loss))
+                    if use_wandb:
+                        wandb.log(
+                            {
+                                "train/loss": float(loss.detach().cpu().item()) * self.training_args.gradient_accumulation_steps,
+                                "train/lr": float(curr_lr),
+                                "train/epoch": epoch + 1,
+                                "train/step": step + 1,
+                            },
+                            step=curr_step,
+                        )
             if save_epochs and (epoch + 1) in save_epochs:
                 save_root = kwargs.get("dump_dir", self.dump_dir)
                 if save_root is not None:

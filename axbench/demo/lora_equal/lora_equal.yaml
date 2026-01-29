@@ -5,16 +5,16 @@ train:
   seed: 42
   use_bf16: true
   use_wandb: true
-  wandb_project: "axbench-lora"
-  dump_dir: "axbench/demo/lora_top10/runs"
+  wandb_project: "axbench-lora-equal"
+  dump_dir: "axbench/demo/lora_equal/runs_equal_concepts"
   output_length: 128
   use_dpo_loss: false
   models:
     LoRA:
       batch_size: 4
       gradient_accumulation_steps: 1
-      n_epochs: 60
-      save_epochs: [5, 11, 16, 20, 30, 40, 50, 60]
+      n_epochs: 100
+      save_epochs: [50, 100]
       lr: 0.0009
       weight_decay: 0.0
       low_rank_dimension: 4

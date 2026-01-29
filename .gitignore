@@ -46,6 +46,11 @@ axbench/archive_of_runs
 axbench/demo/ablations
 axbench/500_first_icml
 axbench/old_demoes
+axbench/demo/lora_top10/older_runs
+axbench/demo/lora_top10/runs/*
+axbench/demo/lora_equal/runs_equal_concepts
+axbench/demo/lora_equal/data
+axbench/demo/lora_equal/runs/*
 
 axbench/examples/upload.ipynb
 tmp.ipynb
@@ -222,3 +227,7 @@ cython_debug/
 *.pkl
 *.pdf
 axbench/scripts/paper/
+axbench/demo/lora_top10/runs
+axbench/demo/lora_equal/runs_equal_concepts
+axbench/demo/lora_equal/data
+axbench/demo/lora_equal/runs/*
