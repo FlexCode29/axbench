@@ -1,0 +1,51 @@
+train:
+  model_name: "google/gemma-2-2b-it"
+  layer: 22
+  component: "res"
+  seed: 42
+  n_epochs: 100
+  use_bf16: true
+  output_length: 128
+  models: 
+    HyperSteer:
+      batch_size: 8
+      max_training_examples: 16000
+      gradient_accumulation_steps: 1
+      n_epochs: 50
+      lr: 0.00008
+      weight_decay: 0.00
+      low_rank_dimension: 1
+      intervention_positions: "all"
+      intervention_type: "addition" # clamping
+      binarize_dataset: false
+      train_on_negative: false
+      exclude_bos: true
+      hypernet_name_or_path: "google/gemma-2-2b-it"
+      num_hidden_layers: 20
+      hypernet_initialize_from_pretrained: true
+inference:
+  mode: benchmark
+  benchmark: supergpqa
+  supergpqa_discipline: Medicine
+
+  # Base LM
+  model_name: google/gemma-2-2b-it
+  seed: 42
+  use_bf16: true
+
+  # Enable steering
+  use_steering: true
+  models: ["HyperSteer"]
+
+  # HyperSteer specifics
+  steering_model_name: google/gemma-2-2b-it
+  steering_intervention_type: addition
+  steering_layer: 22
+  steering_factors: [0,0.2,0.4,0.6,0.8,1.0]
+
+  # Where the trained HyperSteer lives
+  train_dir: runs/hypersteer_reasoning_train/train
+
+  # Benchmark-specific
+  benchmark_batch_size: 8
+  max_questions: 100
