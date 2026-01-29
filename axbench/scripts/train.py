@@ -270,10 +270,13 @@ def save_state(dump_dir, state, concept_metadata, rank):
         f.write(json.dumps(concept_metadata) + "\n")
         
         
-def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, metadata, dump_dir, rank, device, local_rank, world_size):
+def train_hypersteer(
+    model_name,
+    args, generate_args, model_instance, tokenizer,
+    all_df, metadata, dump_dir, rank, device, local_rank, world_size
+):
     # Get the rank and world_size from environment variables
     negative_df = all_df[(all_df["output_concept"] == EMPTY_CONCEPT) & (all_df["category"] == "negative")]
-    model_name = "HyperSteer"
     
     metadata_path = os.path.join(args.data_dir, 'metadata.jsonl')
     is_chat_model = True if args.model_name in CHAT_MODELS else False
@@ -282,7 +285,8 @@ def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, met
         model_instance, tokenizer, layer=args.layer,
         training_args=args.models[model_name],
         lm_model_name=args.model_name,
-        device=device, seed=args.seed, 
+        device=device, seed=args.seed,
+        use_wandb=args.use_wandb,
     )
     
     low_rank_dimension = args.models[model_name].low_rank_dimension \
@@ -325,6 +329,9 @@ def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, met
         "exclude_bos": args.models[model_name].exclude_bos,
         "metadata_path": metadata_path,
         "world_size": world_size,
+        "wandb_project": args.wandb_project,
+        "wandb_name": args.wandb_name,
+        "run_name": args.run_name,
     }
     
     benchmark_model.train(full_df, **kwargs)
@@ -496,7 +503,7 @@ def main():
         logger.warning(f"Training models for concept_id {concept_id} on rank {rank}")
         for model_name in sorted(args.models.keys()):
             
-            if model_name == "HyperSteer":
+            if model_name in {"HyperSteer", "HyperSteerWeight"}:
                 continue # training of HyperSteer is ran separately.
             
             concept = metadata[concept_id]["concept"]
@@ -607,9 +614,15 @@ def main():
     if use_dist:
         dist.barrier()
     
-    if "HyperSteer" in args.models.keys():
-        train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, metadata, dump_dir, rank, device, local_rank, world_size)
-    
+    for m in ("HyperSteer", "HyperSteerWeight"):
+        if m in args.models:
+            train_hypersteer(
+                m,
+                args, generate_args, model_instance, tokenizer,
+                all_df, metadata, dump_dir,
+                rank, device, local_rank, world_size
+            )
+
     # Synchronize all processes 
     if use_dist:
         dist.barrier()
