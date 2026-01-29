@@ -48,7 +48,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Prepare top-10 concept slices (first N rows) of axbench-reasoning in AxBench format."
     )
-    parser.add_argument("--dataset", default="vennemeyerd/axbench-reasoning")
+    parser.add_argument("--dataset", default="NONO/axbench-reasoning")
     parser.add_argument("--split", default="train")
     parser.add_argument("--rows", type=int, default=16000)
     parser.add_argument("--topk", type=int, default=10)

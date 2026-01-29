@@ -1,7 +1,7 @@
 # LoRA top-10 concepts (axbench-reasoning)
 
 This folder contains helpers to:
-- slice the first 16k rows of `vennemeyerd/axbench-reasoning` into top-10 concepts
+- slice the first 16k rows of `NONO/axbench-reasoning` into top-10 concepts
 - train LoRA adapters concept-by-concept, saving checkpoints at epochs 5/11/16
 
 ## 1) Prepare data

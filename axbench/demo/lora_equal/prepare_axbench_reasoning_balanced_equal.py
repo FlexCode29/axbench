@@ -55,7 +55,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Prepare balanced concept slices of axbench-reasoning in AxBench format."
     )
-    parser.add_argument("--dataset", default="vennemeyerd/axbench-reasoning")
+    parser.add_argument("--dataset", default="NONO/axbench-reasoning")
     parser.add_argument("--max_total", type=int, default=16000)
     parser.add_argument("--max_per_concept", type=int, default=20)
     parser.add_argument(

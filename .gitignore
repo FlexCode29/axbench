@@ -29,9 +29,7 @@ axbench/500_fast_correct_save_load
 axbench/500_fast_no_leak
 axbench/500_fast_no_leak_extended
 axbench/500_fast_prompt_only
-axbench/ST310_results_good
 axbench/demo/ablations/dumps
-axbench/ST_310_500_layers_2
 
 
 axbench/scripts/train_fsdp.py
@@ -54,7 +52,6 @@ axbench/models/dbm.py
 axbench/concept1
 axbench/concept3
 axbench/archive_of_runs
-axbench/ST_310_500_layers_2
 axbench/demo_weight
 axbench/archive_of_runs
 axbench/demo/ablations

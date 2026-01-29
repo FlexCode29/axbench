@@ -108,7 +108,7 @@ def plot_aggregated_roc(jsonl_data, write_to_path=None, report_to=[], wandb_name
         )})
 
 
-def plot_metrics(jsonl_data, configs, write_to_path=None, report_to=[], wandb_name=None, mode=None):
+def plot_metrics(jsonl_data, configs, write_to_path=None, report_to=[], wandb_name=None, mode=None, sample_size=None):
     # Collect data into a list
     data = []
     for config in configs:
@@ -138,19 +138,37 @@ def plot_metrics(jsonl_data, configs, write_to_path=None, report_to=[], wandb_na
 
     # Create DataFrame and average metrics
     df = pd.DataFrame(data)
-    df = df.groupby(['Method', 'Factor', 'Metric', 'UseLogScale'], as_index=False).mean()
+    grouped = df.groupby(['Method', 'Factor', 'Metric', 'UseLogScale'], as_index=False).agg(
+        Value=('Value', 'mean'),
+        Std=('Value', 'std'),
+        N=('Value', 'count'),
+    )
+    grouped['Std'] = grouped['Std'].fillna(0)
+    effective_n = grouped['N'].clip(lower=1)
+    if sample_size is not None:
+        effective_n = effective_n * max(int(sample_size), 1)
+    grouped['CI'] = 1.645 * grouped['Std'] / effective_n.pow(0.5)
 
     # Apply log transformation if needed
-    df['TransformedValue'] = df.apply(
+    grouped['TransformedValue'] = grouped.apply(
         lambda row: np.log10(row['Value']) if row['UseLogScale'] else row['Value'],
         axis=1
     )
+    grouped['CI_low'] = grouped['Value'] - grouped['CI']
+    grouped['CI_high'] = grouped['Value'] + grouped['CI']
 
     # Create the plot
+    concept_ci = grouped[(grouped['Metric'] == 'Concept') & (~grouped['UseLogScale'])].copy()
     p = (
-        ggplot(df, aes(x='Factor', y='TransformedValue', color='Method', group='Method')) +
+        ggplot(grouped, aes(x='Factor', y='TransformedValue', color='Method', group='Method')) +
         geom_line() +
         geom_point() +
+        geom_errorbar(
+            data=concept_ci,
+            mapping=aes(ymin='CI_low', ymax='CI_high'),
+            width=0.1,
+            alpha=0.4
+        ) +
         theme_bw() +
         labs(x='Factor', y='Value') +
         facet_wrap('~ Metric', scales='free_y', nrow=1) +  # Plots in a row
@@ -178,8 +196,8 @@ def plot_metrics(jsonl_data, configs, write_to_path=None, report_to=[], wandb_na
         import wandb
         # Separate data by metrics to prepare for wandb line series plotting
         line_series_plots = {}
-        for metric in df['Metric'].unique():
-            metric_data = df[df['Metric'] == metric]
+        for metric in grouped['Metric'].unique():
+            metric_data = grouped[grouped['Metric'] == metric]
             
             xs = metric_data['Factor'].unique().tolist()
             ys = [metric_data[metric_data['Method'] == method]['TransformedValue'].tolist() for method in metric_data['Method'].unique()]

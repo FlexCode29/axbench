@@ -1,0 +1,41 @@
+train:
+  model_name: "google/gemma-2-2b-it"
+  layer: 10
+  component: "res"
+  seed: 42
+  use_bf16: true
+  use_wandb: false
+  run_name: "64r_500_small_fast_allweight_10l_2b_prompt_only"
+  output_length: 128
+  models:
+    HyperSteerWeight:
+      batch_size: 2
+      gradient_accumulation_steps: 1
+      max_training_examples: 1000
+      n_epochs: 10
+      lr: 0.001
+      lr_decay_start_step: 600
+      lr_min: 0.0
+      weight_decay: 0.0
+      low_rank_dimension: 64
+      intervention_positions: "all"
+      binarize_dataset: false
+      train_on_negative: false
+      exclude_bos: true
+      hypernet_name_or_path: "google/gemma-2-2b-it"
+      num_hidden_layers: 8
+      hypernet_initialize_from_pretrained: false
+      weight_target_modules:
+        - "model.layers.10.mlp.up_proj.weight"
+        - "model.layers.11.mlp.up_proj.weight"
+        - "model.layers.12.mlp.up_proj.weight"
+        - "model.layers.13.mlp.up_proj.weight"
+        - "model.layers.14.mlp.up_proj.weight"
+        - "model.layers.15.mlp.up_proj.weight"
+        - "model.layers.10.mlp.down_proj.weight"
+        - "model.layers.11.mlp.down_proj.weight"
+        - "model.layers.12.mlp.down_proj.weight"
+        - "model.layers.13.mlp.down_proj.weight"
+        - "model.layers.14.mlp.down_proj.weight"
+        - "model.layers.15.mlp.down_proj.weight"
+inference:
